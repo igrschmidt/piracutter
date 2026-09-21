@@ -4,6 +4,7 @@
 
 use piracutter::mesh::Tri;
 use egui::{Color32, ColorImage, Pos2};
+use std::collections::HashMap;
 
 pub type V3 = [f32; 3];
 
@@ -132,8 +133,55 @@ impl Basis {
 pub struct Part {
     pub name: &'static str,
     pub tris: Vec<Tri>,
+    /// One normal per triangle corner, smoothed across gentle joins.
+    pub normals: Vec<[V3; 3]>,
     pub color: [f32; 3],
     pub offset: V3,
+}
+
+/// Facets meeting at a shallower angle than this are treated as one curved
+/// surface, so a traced outline reads as the smooth wall it prints as rather
+/// than as a run of flat prisms.
+const CREASE: f32 = 0.6;
+
+impl Part {
+    pub fn new(name: &'static str, tris: Vec<Tri>, color: [f32; 3]) -> Self {
+        let normals = corner_normals(&tris);
+        Part { name, tris, normals, color, offset: [0.0; 3] }
+    }
+}
+
+fn corner_normals(tris: &[Tri]) -> Vec<[V3; 3]> {
+    let key = |v: V3| [v[0].to_bits(), v[1].to_bits(), v[2].to_bits()];
+    let faces: Vec<V3> = tris
+        .iter()
+        .map(|t| norm(cross(sub(t[1], t[0]), sub(t[2], t[0]))))
+        .collect();
+
+    let mut sums: HashMap<[u32; 3], V3> = HashMap::with_capacity(tris.len());
+    for (t, f) in tris.iter().zip(&faces) {
+        for v in t {
+            let e = sums.entry(key(*v)).or_insert([0.0; 3]);
+            *e = add(*e, *f);
+        }
+    }
+
+    let limit = CREASE.cos();
+    tris.iter()
+        .zip(&faces)
+        .map(|(t, f)| {
+            let mut out = [*f; 3];
+            for (i, v) in t.iter().enumerate() {
+                if let Some(sum) = sums.get(&key(*v)) {
+                    let smooth = norm(*sum);
+                    if dot(smooth, *f) >= limit {
+                        out[i] = smooth;
+                    }
+                }
+            }
+            out
+        })
+        .collect()
 }
 
 pub fn bbox<'a>(parts: impl IntoIterator<Item = &'a Part>) -> Option<(V3, V3)> {
@@ -169,40 +217,40 @@ pub fn rasterize<'a>(
     let key = norm([0.35, -0.5, 0.8]);
 
     for part in parts.into_iter() {
-        for t in &part.tris {
+        for (i, t) in part.tris.iter().enumerate() {
             let world: Vec<V3> = t.iter().map(|v| add(*v, part.offset)).collect();
-            let n = norm(cross(sub(world[1], world[0]), sub(world[2], world[0])));
+            let face = norm(cross(sub(world[1], world[0]), sub(world[2], world[0])));
             let centroid = scale(add(add(world[0], world[1]), world[2]), 1.0 / 3.0);
-            if dot(n, sub(b.eye, centroid)) <= 0.0 {
+            if dot(face, sub(b.eye, centroid)) <= 0.0 {
                 continue;
             }
             let Some(p0) = b.project(world[0], near) else { continue };
             let Some(p1) = b.project(world[1], near) else { continue };
             let Some(p2) = b.project(world[2], near) else { continue };
 
-            let lambert = dot(n, key).max(0.0);
-            // Measured against the view axis, not the direction to this face,
-            // so a large flat surface does not band across its triangles.
-            let rim = 1.0 - dot(n, b.fwd).abs();
-            let shade = 0.30 + 0.62 * lambert + 0.10 * rim * rim;
-            let color = [
-                (part.color[0] * shade).clamp(0.0, 255.0) as u8,
-                (part.color[1] * shade).clamp(0.0, 255.0) as u8,
-                (part.color[2] * shade).clamp(0.0, 255.0) as u8,
-            ];
-            fill(&mut px, &mut depth, w, h, [p0, p1, p2], color);
+            let corners = part.normals.get(i).copied().unwrap_or([face; 3]);
+            let mut shade = [0.0f32; 3];
+            for (k, n) in corners.iter().enumerate() {
+                // Rim light reads off the view axis, not the direction to this
+                // face, so a large flat surface does not band across triangles.
+                let rim = 1.0 - dot(*n, b.fwd).abs();
+                shade[k] = 0.30 + 0.62 * dot(*n, key).max(0.0) + 0.10 * rim * rim;
+            }
+            fill(&mut px, &mut depth, w, h, [p0, p1, p2], part.color, shade);
         }
     }
     ColorImage::from_rgba_unmultiplied([w, h], &px)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fill(
     px: &mut [u8],
     depth: &mut [f32],
     w: usize,
     h: usize,
     v: [(Pos2, f32); 3],
-    color: [u8; 3],
+    color: [f32; 3],
+    shade: [f32; 3],
 ) {
     let (a, b, c) = (v[0].0, v[1].0, v[2].0);
     let area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
@@ -236,9 +284,10 @@ fn fill(
                 continue;
             }
             depth[i] = z;
-            px[i * 4] = color[0];
-            px[i * 4 + 1] = color[1];
-            px[i * 4 + 2] = color[2];
+            let lit = w0 * shade[0] + w1 * shade[1] + w2 * shade[2];
+            for c in 0..3 {
+                px[i * 4 + c] = (color[c] * lit).clamp(0.0, 255.0) as u8;
+            }
             px[i * 4 + 3] = 255;
         }
     }

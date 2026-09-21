@@ -41,10 +41,15 @@ pub struct App {
     format: Format,
 }
 
+/// Bumped whenever a default changes, so a saved session does not keep
+/// serving values the new build no longer considers sensible.
+const SETTINGS_VERSION: u32 = 2;
+
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>) -> Self {
         let params = cc
             .storage
+            .filter(|s| eframe::get_value::<u32>(*s, "settings_version") == Some(SETTINGS_VERSION))
             .and_then(|s| eframe::get_value::<Params>(s, "params"))
             .unwrap_or_default();
         let mut app = Self {
@@ -304,22 +309,12 @@ impl App {
         let mut parts = Vec::new();
         if self.params.cutter_enabled {
             if let Ok(tris) = cutter_tris(b, &self.params) {
-                parts.push(Part {
-                    name: "cutter",
-                    tris,
-                    color: [176.0, 190.0, 214.0],
-                    offset: [0.0; 3],
-                });
+                parts.push(Part::new("cutter", tris, [176.0, 190.0, 214.0]));
             }
         }
         if self.params.stamp_enabled {
             if let Ok(tris) = stamp_tris(b, &self.params) {
-                parts.push(Part {
-                    name: "stamp",
-                    tris,
-                    color: [226.0, 196.0, 148.0],
-                    offset: [0.0; 3],
-                });
+                parts.push(Part::new("stamp", tris, [226.0, 196.0, 148.0]));
             }
         }
 
@@ -543,6 +538,7 @@ fn seg_image(b: &Build) -> egui::ColorImage {
 
 impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, "settings_version", &SETTINGS_VERSION);
         eframe::set_value(storage, "params", &self.params);
     }
 
