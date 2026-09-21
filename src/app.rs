@@ -1,8 +1,15 @@
-use cookiecut::geometry::Polygon;
-use cookiecut::params::{BgMode, Params, SizeMode};
-use cookiecut::pipeline::{build, export, load_image, Build};
+use crate::render::{self, Camera, Part};
+use piracutter::geometry::Polygon;
+use piracutter::params::{BgMode, Params, SizeMode};
+use piracutter::pipeline::{build, cutter_tris, export, load_image, stamp_tris, Build};
 use egui::{Color32, Pos2, Rect, Stroke, Vec2};
 use std::path::PathBuf;
+
+#[derive(Clone, Copy, PartialEq)]
+enum View {
+    Outline,
+    Solid,
+}
 
 pub struct App {
     params: Params,
@@ -17,6 +24,20 @@ pub struct App {
     show_flange: bool,
     show_plate: bool,
     show_detail: bool,
+
+    view: View,
+    camera: Camera,
+    parts: Vec<Part>,
+    solid_tex: Option<egui::TextureHandle>,
+    /// Bumped on every rebuild so a cached frame knows it is stale.
+    mesh_gen: u64,
+    raster_key: Option<(u64, [usize; 2], [f32; 6])>,
+    side_by_side: bool,
+    show_cutter_3d: bool,
+    show_stamp_3d: bool,
+    show_plate_grid: bool,
+    /// Framing needs the viewport shape, so it waits for the next paint.
+    fit_pending: bool,
 }
 
 impl App {
@@ -31,13 +52,25 @@ impl App {
             image_path: None,
             result: None,
             seg_tex: None,
-            status: "Open an image (File > Open, or drop it here).".into(),
+            status: "Abra uma imagem com o botão Abrir imagem, ou largue o ficheiro nesta janela.".into(),
             dirty: false,
             show_seg: true,
             show_blade: true,
             show_flange: true,
             show_plate: true,
             show_detail: true,
+
+            view: View::Solid,
+            camera: Camera::default(),
+            parts: Vec::new(),
+            solid_tex: None,
+            mesh_gen: 0,
+            raster_key: None,
+            side_by_side: true,
+            show_cutter_3d: true,
+            show_stamp_3d: true,
+            show_plate_grid: true,
+            fit_pending: false,
         };
         if let Some(p) = initial {
             app.open(p);
@@ -48,12 +81,12 @@ impl App {
     fn open(&mut self, path: PathBuf) {
         match load_image(&path) {
             Ok(img) => {
-                self.status = format!("Loaded {} ({}x{})", path.display(), img.width(), img.height());
+                self.status = format!("Imagem carregada: {} ({}x{})", path.display(), img.width(), img.height());
                 self.image = Some(img);
                 self.image_path = Some(path);
                 self.dirty = true;
             }
-            Err(e) => self.status = format!("Error: {e:#}"),
+            Err(e) => self.status = format!("Erro: {e:#}"),
         }
     }
 
@@ -69,7 +102,7 @@ impl App {
                     egui::TextureOptions::NEAREST,
                 ));
                 self.status = format!(
-                    "Built in {} ms. blade {} base {} plate {} detail {} polygons.",
+                    "Gerado em {} ms. Lâmina {}, base {}, placa {}, detalhe {} polígonos.",
                     t.elapsed().as_millis(),
                     b.blade.len(),
                     b.base.len(),
@@ -77,21 +110,24 @@ impl App {
                     b.detail.len()
                 ) + &match (b.relaxed, b.dropped) {
                     (0, 0) => String::new(),
-                    (r, 0) => format!(" Smoothing eased off ({r}) to keep offsets apart."),
-                    (0, d) => format!(" {d} shape(s) too tangled to mesh, left out."),
+                    (r, 0) => format!(" Suavização reduzida ({r}) para manter os contornos afastados."),
+                    (0, d) => format!(" {d} forma(s) demasiado emaranhada(s) para gerar sólido, deixada(s) de fora."),
                     (r, d) => format!(
-                        " Smoothing eased off ({r}); {d} shape(s) too tangled to mesh, left out."
+                        " Suavização reduzida ({r}); {d} forma(s) demasiado emaranhada(s) para gerar sólido, deixada(s) de fora."
                     ),
                 };
+                let first = self.parts.is_empty();
                 self.result = Some(b);
+                self.rebuild_mesh();
+                self.fit_pending |= first;
             }
-            Err(e) => self.status = format!("Error: {e:#}"),
+            Err(e) => self.status = format!("Erro: {e:#}"),
         }
     }
 
     fn export_dialog(&mut self) {
         let Some(b) = &self.result else {
-            self.status = "Nothing to export.".into();
+            self.status = "Nada para exportar.".into();
             return;
         };
         let suggested = self
@@ -99,7 +135,7 @@ impl App {
             .as_ref()
             .and_then(|p| p.file_stem())
             .and_then(|s| s.to_str())
-            .unwrap_or("cookie")
+            .unwrap_or("bolacha")
             .to_string();
         let mut dlg = rfd::FileDialog::new()
             .set_file_name(format!("{suggested}.stl"))
@@ -114,9 +150,9 @@ impl App {
                         .iter()
                         .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
                         .collect();
-                    self.status = format!("Wrote {}", names.join(", "));
+                    self.status = format!("Ficheiros gravados: {}", names.join(", "));
                 }
-                Err(e) => self.status = format!("Export failed: {e:#}"),
+                Err(e) => self.status = format!("Falha ao exportar: {e:#}"),
             }
         }
     }
@@ -133,84 +169,83 @@ impl App {
             };
         }
 
-        ui.heading("Size");
-        s!(ui, p.size_mm, 15.0..=250.0, "Cookie size", " mm", "Measured across the artwork itself. Blank space around the picture is ignored, and the flange adds to this.");
-        egui::ComboBox::from_label("Measured across")
+        ui.heading("Tamanho");
+        s!(ui, p.size_mm, 15.0..=250.0, "Tamanho da bolacha", " mm", "Medido no próprio desenho. O espaço vazio à volta da imagem é ignorado, e a aba acrescenta a este valor.");
+        egui::ComboBox::from_label("Medido em")
             .selected_text(match p.size_mode {
-                SizeMode::Width => "width",
-                SizeMode::Height => "height",
-                SizeMode::Longest => "longest side",
+                SizeMode::Width => "largura",
+                SizeMode::Height => "altura",
+                SizeMode::Longest => "maior lado",
             })
             .show_ui(ui, |ui| {
                 for (m, label) in [
-                    (SizeMode::Longest, "longest side"),
-                    (SizeMode::Width, "width"),
-                    (SizeMode::Height, "height"),
+                    (SizeMode::Longest, "maior lado"),
+                    (SizeMode::Width, "largura"),
+                    (SizeMode::Height, "altura"),
                 ] {
                     changed |= ui.selectable_value(&mut p.size_mode, m, label).changed();
                 }
             });
-        s!(ui, p.px_per_mm, 3.0..=20.0, "Resolution", " px/mm", "Higher = smoother curves, slower. 8 is plenty for printing.");
+        s!(ui, p.px_per_mm, 3.0..=20.0, "Resolução", " px/mm", "Mais alto dá curvas mais suaves e demora mais. 8 chega bem para impressão.");
         changed |= ui
-            .checkbox(&mut p.mirror, "Mirror geometry")
-            .on_hover_text("Keep on. Parts are flipped when pressed into dough, so the model must be a mirror image.")
+            .checkbox(&mut p.mirror, "Espelhar geometria")
+            .on_hover_text("Deixe ligado. As peças são viradas ao carimbar a massa, por isso o modelo tem de ser a imagem espelhada.")
             .changed();
 
         ui.separator();
-        ui.heading("Image");
-        egui::ComboBox::from_label("Background")
-            .selected_text(format!("{:?}", p.bg_mode))
+        ui.heading("Imagem");
+        egui::ComboBox::from_label("Fundo")
+            .selected_text(bg_label(p.bg_mode))
             .show_ui(ui, |ui| {
                 for m in [BgMode::Auto, BgMode::Alpha, BgMode::BorderColor] {
-                    let label = format!("{m:?}");
-                    changed |= ui.selectable_value(&mut p.bg_mode, m, label).changed();
+                    changed |= ui.selectable_value(&mut p.bg_mode, m, bg_label(m)).changed();
                 }
             });
-        s!(ui, p.bg_tolerance, 0.01..=0.6, "Background tolerance", "", "How far a colour may differ from the image border colour and still count as background.");
+        s!(ui, p.bg_tolerance, 0.01..=0.6, "Tolerância do fundo", "", "Quanto uma cor pode diferir da cor das margens da imagem e ainda contar como fundo.");
         changed |= ui
-            .checkbox(&mut p.keep_holes, "Keep enclosed holes")
-            .on_hover_text("Off: background trapped inside the shape becomes part of the cookie. On: it becomes a hole with its own blade.")
+            .checkbox(&mut p.keep_holes, "Manter buracos fechados")
+            .on_hover_text("Desligado: o fundo preso dentro da forma passa a fazer parte da bolacha. Ligado: passa a ser um buraco com lâmina própria.")
             .changed();
-        s!(ui, p.detail_threshold, 0..=255, "Detail darkness", "", "Pixels darker than this become raised stamp lines.");
-        s!(ui, p.min_blob_mm2, 0.0..=20.0, "Min shape area", " mm²", "Drops silhouette specks smaller than this.");
-        s!(ui, p.min_detail_mm2, 0.0..=5.0, "Min detail area", " mm²", "Drops detail specks smaller than this.");
+        s!(ui, p.detail_threshold, 0..=255, "Escuridão do detalhe", "", "Os pixels mais escuros do que este valor passam a linhas em relevo no carimbo.");
+        s!(ui, p.min_blob_mm2, 0.0..=20.0, "Área mínima da forma", " mm²", "Descarta salpicos da silhueta menores do que isto.");
+        s!(ui, p.min_detail_mm2, 0.0..=5.0, "Área mínima do detalhe", " mm²", "Descarta salpicos de detalhe menores do que isto.");
 
         ui.separator();
-        changed |= ui.checkbox(&mut p.cutter_enabled, "Cutter").changed();
+        changed |= ui.checkbox(&mut p.cutter_enabled, "Cortador").changed();
         ui.add_enabled_ui(p.cutter_enabled, |ui| {
-            s!(ui, p.blade_thickness, 0.4..=3.0, "Blade thickness", " mm", "Two nozzle widths (0.8) prints as a clean two-wall blade.");
-            s!(ui, p.blade_height, 5.0..=40.0, "Blade height", " mm", "");
-            s!(ui, p.blade_offset, 0.0..=3.0, "Blade offset", " mm", "Gap between the silhouette edge and the blade inner face.");
-            s!(ui, p.flange_width, 0.0..=15.0, "Flange width", " mm", "Outward lip at the base you press on.");
-            s!(ui, p.flange_height, 0.4..=6.0, "Flange height", " mm", "");
-            s!(ui, p.inner_lip_width, 0.0..=5.0, "Inner lip width", " mm", "Optional lip inside the blade, same height as flange. Adds stiffness on thin shapes.");
+            s!(ui, p.blade_thickness, 0.4..=3.0, "Espessura da lâmina", " mm", "Duas larguras de bico (0,8) imprimem uma lâmina limpa de duas paredes.");
+            s!(ui, p.blade_height, 5.0..=40.0, "Altura da lâmina", " mm", "");
+            s!(ui, p.blade_offset, 0.0..=3.0, "Afastamento da lâmina", " mm", "Folga entre o contorno da silhueta e a face interior da lâmina.");
+            s!(ui, p.flange_width, 0.0..=15.0, "Largura da aba", " mm", "Rebordo para fora na base, onde faz pressão com a mão.");
+            s!(ui, p.flange_height, 0.4..=6.0, "Altura da aba", " mm", "");
+            s!(ui, p.inner_lip_width, 0.0..=5.0, "Largura do rebordo interior", " mm", "Rebordo opcional por dentro da lâmina, à altura da aba. Dá rigidez em formas estreitas.");
         });
 
         ui.separator();
-        changed |= ui.checkbox(&mut p.stamp_enabled, "Stamp").changed();
+        changed |= ui.checkbox(&mut p.stamp_enabled, "Carimbo").changed();
         ui.add_enabled_ui(p.stamp_enabled, |ui| {
-            s!(ui, p.plate_thickness, 1.0..=10.0, "Plate thickness", " mm", "");
-            s!(ui, p.plate_clearance, 0.0..=4.0, "Plate clearance", " mm", "How much smaller than the cutter the plate is, so it fits inside the blade.");
-            s!(ui, p.detail_height, 0.4..=5.0, "Detail height", " mm", "How far the lines stand out from the plate.");
-            s!(ui, p.detail_expand, -0.5..=1.5, "Detail thicken", " mm", "Grow (or shrink, negative) the detail lines. Lines under ~0.8 mm total will not print.");
-            s!(ui, p.rim_width, 0.0..=4.0, "Outline rim", " mm", "Raised band tracing the plate edge, so the cookie gets an embossed outline. Zero turns it off.");
-            s!(ui, p.detail_inset, 0.0..=3.0, "Detail edge inset", " mm", "Keep the rest of the detail this far inside the rim.");
+            s!(ui, p.plate_thickness, 1.0..=10.0, "Espessura da placa", " mm", "");
+            s!(ui, p.plate_clearance, 0.0..=4.0, "Folga da placa", " mm", "Quanto a placa é mais pequena do que o cortador, para entrar dentro da lâmina.");
+            s!(ui, p.detail_height, 0.4..=5.0, "Altura do detalhe", " mm", "Quanto as linhas sobressaem da placa.");
+            s!(ui, p.detail_expand, -0.5..=1.5, "Engrossar detalhe", " mm", "Engrossa as linhas do detalhe, ou afina-as com valores negativos. Linhas com menos de 0,8 mm não saem na impressão.");
+            s!(ui, p.rim_width, 0.0..=4.0, "Rebordo do contorno", " mm", "Faixa em relevo a acompanhar a berma da placa, para a bolacha ficar com o contorno marcado. Zero desliga.");
+            s!(ui, p.detail_inset, 0.0..=3.0, "Recuo do detalhe", " mm", "Mantém o resto do detalhe a esta distância por dentro do rebordo.");
         });
 
         ui.separator();
-        ui.heading("Curves");
-        s!(ui, p.smooth_iters, 0..=4, "Smoothing", "", "Chaikin passes over traced contours.");
-        s!(ui, p.simplify_mm, 0.0..=0.3, "Simplify", " mm", "Point reduction tolerance. Lower = bigger STL.");
+        ui.heading("Curvas");
+        s!(ui, p.smooth_iters, 0..=4, "Suavização", "", "Passagens de Chaikin sobre os contornos traçados.");
+        s!(ui, p.simplify_mm, 0.0..=0.3, "Simplificação", " mm", "Tolerância na redução de pontos. Menor dá STL maior.");
 
         ui.separator();
         ui.horizontal(|ui| {
-            if ui.button("Reset defaults").clicked() {
+            if ui.button("Repor predefinições").clicked() {
                 *p = Params::default();
                 changed = true;
             }
-            if ui.button("Save preset").clicked() {
+            if ui.button("Guardar predefinição").clicked() {
                 if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("cookiecut-preset.json")
+                    .set_file_name("piracutter-predefinicao.json")
                     .add_filter("JSON", &["json"])
                     .save_file()
                 {
@@ -218,12 +253,12 @@ impl App {
                         .map_err(|e| e.to_string())
                         .and_then(|s| std::fs::write(&path, s).map_err(|e| e.to_string()));
                     self.status = match res {
-                        Ok(()) => format!("Saved {}", path.display()),
-                        Err(e) => format!("Save failed: {e}"),
+                        Ok(()) => format!("Predefinição guardada: {}", path.display()),
+                        Err(e) => format!("Falha ao guardar: {e}"),
                     };
                 }
             }
-            if ui.button("Load preset").clicked() {
+            if ui.button("Carregar predefinição").clicked() {
                 if let Some(path) = rfd::FileDialog::new().add_filter("JSON", &["json"]).pick_file() {
                     match std::fs::read_to_string(&path)
                         .map_err(|e| e.to_string())
@@ -233,7 +268,7 @@ impl App {
                             *p = np;
                             changed = true;
                         }
-                        Err(e) => self.status = format!("Load failed: {e}"),
+                        Err(e) => self.status = format!("Falha ao carregar: {e}"),
                     }
                 }
             }
@@ -242,6 +277,169 @@ impl App {
         if changed {
             self.dirty = true;
         }
+    }
+
+    fn rebuild_mesh(&mut self) {
+        self.parts.clear();
+        self.mesh_gen = self.mesh_gen.wrapping_add(1);
+        self.raster_key = None;
+        let Some(b) = &self.result else { return };
+
+        let mut parts = Vec::new();
+        if self.params.cutter_enabled {
+            if let Ok(tris) = cutter_tris(b, &self.params) {
+                parts.push(Part {
+                    name: "cutter",
+                    tris,
+                    color: [176.0, 190.0, 214.0],
+                    offset: [0.0; 3],
+                });
+            }
+        }
+        if self.params.stamp_enabled {
+            if let Ok(tris) = stamp_tris(b, &self.params) {
+                parts.push(Part {
+                    name: "stamp",
+                    tris,
+                    color: [226.0, 196.0, 148.0],
+                    offset: [0.0; 3],
+                });
+            }
+        }
+
+        if self.side_by_side && parts.len() == 2 {
+            let edge = |p: &Part, pick: fn(f32, f32) -> f32, init: f32| {
+                p.tris.iter().flatten().map(|v| v[0]).fold(init, pick)
+            };
+            let cutter_right = edge(&parts[0], f32::max, f32::MIN);
+            let stamp_left = edge(&parts[1], f32::min, f32::MAX);
+            parts[1].offset[0] = cutter_right - stamp_left + 8.0;
+        }
+
+        // Centre the scene over the plate so orbiting feels natural.
+        if let Some((lo, hi)) = render::bbox(parts.iter()) {
+            let centre = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5];
+            for p in &mut parts {
+                p.offset[0] -= centre[0];
+                p.offset[1] -= centre[1];
+            }
+        }
+        self.parts = parts;
+    }
+
+    fn visible_parts(&self) -> impl Iterator<Item = &Part> {
+        let (cutter, stamp) = (self.show_cutter_3d, self.show_stamp_3d);
+        self.parts.iter().filter(move |p| match p.name {
+            "cutter" => cutter,
+            _ => stamp,
+        })
+    }
+
+    fn fit_view(&mut self, aspect: f32) {
+        match render::bbox(self.visible_parts()) {
+            Some(bb) => self.camera.frame(bb, aspect),
+            None => self.camera = Camera::default(),
+        }
+        self.raster_key = None;
+    }
+
+    fn solid_view(&mut self, ui: &mut egui::Ui) {
+        let (resp, painter) =
+            ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
+        let rect = resp.rect;
+        painter.rect_filled(rect, 0.0, Color32::from_gray(26));
+
+        if self.parts.is_empty() {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Abra uma imagem para ver a pré-visualização em sólido.",
+                egui::FontId::proportional(14.0),
+                Color32::from_gray(140),
+            );
+            return;
+        }
+
+        if std::mem::take(&mut self.fit_pending) {
+            self.fit_view(rect.width() / rect.height().max(1.0));
+        }
+
+        if resp.dragged_by(egui::PointerButton::Primary) {
+            let d = resp.drag_delta();
+            self.camera.yaw -= d.x * 0.01;
+            self.camera.pitch = (self.camera.pitch + d.y * 0.01).clamp(-1.45, 1.45);
+            self.raster_key = None;
+        }
+        if resp.dragged_by(egui::PointerButton::Secondary)
+            || resp.dragged_by(egui::PointerButton::Middle)
+        {
+            let d = resp.drag_delta();
+            let basis = self.camera.basis(rect.width(), rect.height());
+            let k = self.camera.dist * 0.0015;
+            self.camera.target = basis.pan(self.camera.target, -d.x * k, d.y * k);
+            self.raster_key = None;
+        }
+        if resp.hovered() {
+            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+            if scroll.abs() > 0.01 {
+                self.camera.dist = (self.camera.dist * (1.0 - scroll * 0.002)).clamp(5.0, 5000.0);
+                self.raster_key = None;
+            }
+        }
+        if resp.double_clicked() {
+            self.fit_view(rect.width() / rect.height().max(1.0));
+        }
+
+        if self.show_plate_grid {
+            for (seg, color) in
+                render::plate_lines(&self.camera, rect.width(), rect.height(), 120.0, 10.0)
+            {
+                painter.line_segment(
+                    [rect.min + seg[0].to_vec2(), rect.min + seg[1].to_vec2()],
+                    Stroke::new(1.0_f32, color),
+                );
+            }
+        }
+
+        // Half resolution while the camera moves keeps dragging responsive.
+        let ppp = ui.ctx().pixels_per_point();
+        let quality = if resp.dragged() { 0.5 } else { 1.0 };
+        let w = ((rect.width() * ppp * quality) as usize).clamp(16, 1800);
+        let h = ((rect.height() * ppp * quality) as usize).clamp(16, 1400);
+        let key = (
+            self.mesh_gen,
+            [w, h],
+            [
+                self.camera.yaw,
+                self.camera.pitch,
+                self.camera.dist,
+                self.camera.target[0],
+                self.camera.target[1],
+                self.camera.target[2],
+            ],
+        );
+        if self.raster_key != Some(key) || self.solid_tex.is_none() {
+            let img = render::rasterize(self.visible_parts(), &self.camera, w, h);
+            self.solid_tex =
+                Some(ui.ctx().load_texture("solid", img, egui::TextureOptions::LINEAR));
+            self.raster_key = Some(key);
+        }
+        if let Some(tex) = &self.solid_tex {
+            painter.image(
+                tex.id(),
+                rect,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+
+        painter.text(
+            rect.left_bottom() + Vec2::new(8.0, -8.0),
+            egui::Align2::LEFT_BOTTOM,
+            "arrastar para rodar · arrastar com o botão direito para deslocar · roda do rato para ampliar · duplo clique para enquadrar",
+            egui::FontId::proportional(11.0),
+            Color32::from_gray(130),
+        );
     }
 
     fn preview(&self, ui: &mut egui::Ui) {
@@ -296,10 +494,18 @@ impl App {
         painter.text(
             rect.left_top() + Vec2::new(8.0, 8.0),
             egui::Align2::LEFT_TOP,
-            format!("{:.1} x {:.1} mm (with margin)", wmm, hmm),
+            format!("{:.1} x {:.1} mm (com margem)", wmm, hmm),
             egui::FontId::monospace(12.0),
             Color32::LIGHT_GRAY,
         );
+    }
+}
+
+fn bg_label(m: BgMode) -> &'static str {
+    match m {
+        BgMode::Auto => "automático",
+        BgMode::Alpha => "transparência",
+        BgMode::BorderColor => "cor das margens",
     }
 }
 
@@ -334,24 +540,47 @@ impl eframe::App for App {
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if ui.button("Open image…").clicked() {
+                if ui.button("Abrir imagem…").clicked() {
                     if let Some(p) = rfd::FileDialog::new()
-                        .add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp", "gif"])
+                        .add_filter("Imagens", &["png", "jpg", "jpeg", "webp", "bmp", "gif"])
                         .pick_file()
                     {
                         self.open(p);
                     }
                 }
-                if ui.button("Export STL…").clicked() {
+                if ui.button("Exportar STL…").clicked() {
                     self.export_dialog();
                 }
                 ui.separator();
-                ui.label("Show:");
-                ui.checkbox(&mut self.show_seg, "image");
-                ui.checkbox(&mut self.show_flange, "flange");
-                ui.checkbox(&mut self.show_blade, "blade");
-                ui.checkbox(&mut self.show_plate, "plate");
-                ui.checkbox(&mut self.show_detail, "detail");
+                ui.selectable_value(&mut self.view, View::Solid, "3D");
+                ui.selectable_value(&mut self.view, View::Outline, "Contornos");
+                ui.separator();
+                match self.view {
+                    View::Solid => {
+                        if ui.button("Enquadrar").clicked() {
+                            self.fit_pending = true;
+                        }
+                        ui.checkbox(&mut self.show_cutter_3d, "cortador");
+                        ui.checkbox(&mut self.show_stamp_3d, "carimbo");
+                        ui.checkbox(&mut self.show_plate_grid, "grelha");
+                        if ui
+                            .checkbox(&mut self.side_by_side, "lado a lado")
+                            .on_hover_text("Desligado encaixa o carimbo dentro do cortador, como as peças assentam uma na outra.")
+                            .changed()
+                        {
+                            self.rebuild_mesh();
+                        }
+                        self.raster_key = None;
+                    }
+                    View::Outline => {
+                        ui.label("Mostrar:");
+                        ui.checkbox(&mut self.show_seg, "imagem");
+                        ui.checkbox(&mut self.show_flange, "base");
+                        ui.checkbox(&mut self.show_blade, "lâmina");
+                        ui.checkbox(&mut self.show_plate, "placa");
+                        ui.checkbox(&mut self.show_detail, "detalhe");
+                    }
+                }
             });
         });
 
@@ -370,6 +599,11 @@ impl eframe::App for App {
             self.rebuild(ctx);
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| self.preview(ui));
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| match self.view {
+                View::Solid => self.solid_view(ui),
+                View::Outline => self.preview(ui),
+            });
     }
 }

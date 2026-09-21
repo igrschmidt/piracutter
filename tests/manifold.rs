@@ -1,6 +1,6 @@
-use cookiecut::mesh::Tri;
-use cookiecut::params::{Params, SizeMode};
-use cookiecut::pipeline::{build, cutter_tris, stamp_tris};
+use piracutter::mesh::Tri;
+use piracutter::params::{Params, SizeMode};
+use piracutter::pipeline::{build, cutter_tris, stamp_tris};
 use image::{Rgba, RgbaImage};
 use std::collections::HashMap;
 

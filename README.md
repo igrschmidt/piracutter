@@ -1,90 +1,106 @@
-# cookiecut
+# PiraCutter
 
-Turns a flat picture into two printable STL files: a cookie cutter and a
-matching stamp that presses the artwork into the dough.
+Transforma uma imagem plana em dois ficheiros STL prontos a imprimir: um
+cortador de bolachas e o carimbo que marca o desenho na massa.
 
-It is a desktop app with a live preview and a command line mode for batches.
-Everything runs locally, nothing is uploaded, and there is no AI involved. The
-outline is traced from the image and offset with a distance field, so the same
-picture always gives the same geometry.
+É uma aplicação de secretária com pré-visualização em 3D, e também funciona
+por linha de comandos para trabalhos em série. Corre tudo localmente, nada é
+enviado para lado nenhum e não há inteligência artificial pelo meio. O
+contorno é traçado a partir da imagem e afastado com um campo de distâncias,
+por isso a mesma imagem dá sempre a mesma geometria.
 
-## What you get
+## O que sai
 
-Feed it a flat illustration with a plain background, like clipart or a logo.
+Dê-lhe uma ilustração plana com fundo liso, do género de clipart ou logótipo.
 
-- **Cutter** — a blade wall standing on a flange you press with your palm.
-- **Stamp** — a plate that drops inside the cutter, carrying a raised outline
-  and every dark line and spot from the picture.
+- **Cortador** — a lâmina assente numa aba onde faz pressão com a mão.
+- **Carimbo** — uma placa que entra dentro do cortador, com o contorno em
+  relevo e todas as linhas e manchas escuras do desenho.
 
-Both parts are exported as single closed surfaces, so slicers take them
-without a repair step.
+As duas peças são exportadas como superfícies fechadas, por isso o laminador
+aceita-as sem passo de reparação.
 
-## Install
+## Instalação
 
-Needs [Rust](https://rustup.rs). Same commands on macOS, Windows and Linux.
+Precisa do [Rust](https://rustup.rs). Os mesmos comandos em macOS, Windows e
+Linux.
 
 ```
 cargo build --release
 ```
 
-The binary lands in `target/release/cookiecut` (`cookiecut.exe` on Windows).
+O executável fica em `target/release/piracutter` (`piracutter.exe` no
+Windows).
 
-On Linux you also need the usual windowing headers, for example
-`libxkbcommon-dev libgtk-3-dev` on Debian and Ubuntu.
+Em Linux são ainda precisos os cabeçalhos habituais do sistema de janelas, por
+exemplo `libxkbcommon-dev libgtk-3-dev` em Debian e Ubuntu.
 
-## Use
+## Utilização
 
-Double-click the binary, or run it with no arguments, to get the app. Open an
-image or drop one on the window, adjust the sliders, then press Export STL.
-Two files are written next to the name you choose, ending in `_cutter.stl` and
-`_stamp.stl`. Settings persist between sessions, and presets save to JSON.
+Faça duplo clique no executável, ou corra-o sem argumentos, para abrir a
+aplicação. Abra uma imagem ou largue-a na janela, mexa nos controlos e carregue
+em Exportar STL. São gravados dois ficheiros junto do nome que escolher,
+terminados em `_cortador.stl` e `_carimbo.stl`. As definições ficam guardadas
+entre sessões, e as predefinições gravam-se em JSON.
 
-For batches:
+Para trabalhos em série:
 
 ```
-cookiecut leopard.png -o leopard.stl
-cookiecut leopard.png -o leopard.stl --size 65
-cookiecut leopard.png -o leopard.stl --config party-set.json
+piracutter leopardo.png -o leopardo.stl
+piracutter leopardo.png -o leopardo.stl --size 65
+piracutter leopardo.png -o leopardo.stl --config festa.json
 ```
 
-## Settings worth knowing
+## Vistas
 
-**Cookie size** is measured across the artwork, not the image file, so empty
-space around the picture does not shrink the result. Pick whether it applies
-to the width, the height, or the longest side.
+A vista **3D** mostra as duas peças sólidas sobre a mesa de impressão. Arraste
+para rodar, arraste com o botão direito para deslocar, use a roda do rato para
+ampliar e faça duplo clique para enquadrar. Desligue **lado a lado** para ver o
+carimbo encaixado dentro do cortador, como as peças assentam uma na outra.
 
-**Mirror geometry** is on by default and should stay on. A stamp is pressed
-face down, so the printed part has to be the mirror of the picture for the
-cookie to come out the right way round.
+A vista **Contornos** mostra os traçados por cima da imagem segmentada, útil
+para perceber o que foi lido como fundo e o que passou a detalhe.
 
-**Blade thickness** at 0.8 mm prints as two clean walls with a 0.4 mm nozzle.
-**Detail thicken** matters most on busy artwork: raised lines thinner than
-about 0.8 mm will not survive printing, so grow them until they do.
+## Definições que vale a pena conhecer
 
-**Background** is read from the image's transparency when it has any, and
-otherwise from the colour around the border. Raise the tolerance if parts of
-the background survive, lower it if the artwork is being eaten.
+**Tamanho da bolacha** é medido no desenho, não no ficheiro de imagem, por isso
+o espaço vazio à volta da imagem não encolhe o resultado. Escolha se se aplica
+à largura, à altura ou ao maior lado.
 
-If the status line mentions shapes being left out, some detail was too tangled
-to turn into solid geometry. Raising the resolution, thickening the detail, or
-raising the minimum detail area usually clears it.
+**Espelhar geometria** vem ligado e deve ficar assim. O carimbo é pressionado
+virado para baixo, por isso a peça impressa tem de ser a imagem espelhada para
+a bolacha sair na posição certa.
 
-## Printing
+**Espessura da lâmina** a 0,8 mm imprime duas paredes limpas com um bico de
+0,4 mm. **Engrossar detalhe** conta sobretudo em desenhos carregados: linhas em
+relevo com menos de 0,8 mm não aguentam a impressão, por isso engrosse-as até
+aguentarem.
 
-Print both parts flat on the bed with no supports. The cutter wants no top
-solid layers and a couple of perimeters. Food-safe practice is the usual
-advice for printed cutters: use a sealed or food-grade filament, wash by hand,
-and treat them as single-occasion tools rather than dishwasher hardware.
+**Fundo** é lido a partir da transparência da imagem quando ela existe, e caso
+contrário a partir da cor à volta das margens. Suba a tolerância se sobrarem
+pedaços de fundo, baixe-a se o desenho estiver a ser comido.
 
-## Tests
+Se a barra de estado falar em formas deixadas de fora, algum detalhe ficou
+emaranhado demais para virar sólido. Subir a resolução, engrossar o detalhe ou
+subir a área mínima do detalhe costuma resolver.
+
+## Impressão
+
+Imprima as duas peças deitadas na mesa, sem suportes. O cortador quer zero
+camadas sólidas no topo e dois ou três perímetros. Quanto a segurança
+alimentar vale o costume para cortadores impressos: use filamento próprio ou
+selado, lave à mão e trate-os como utensílios de ocasião e não como loiça de
+máquina.
+
+## Testes
 
 ```
 cargo test
 ```
 
-The suite builds both parts across seventeen setting combinations and fails if
-any exported surface is not closed.
+A bateria gera as duas peças em dezassete combinações de definições e falha se
+alguma superfície exportada não ficar fechada.
 
-## Licence
+## Licença
 
 MIT.

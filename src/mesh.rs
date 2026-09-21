@@ -109,7 +109,7 @@ pub fn extrude(poly: &Polygon, z0: f32, z1: f32, out: &mut Vec<Tri>) -> Result<(
 
 pub fn write_stl<W: Write>(mut w: W, tris: &[Tri]) -> Result<()> {
     let mut header = [0u8; 80];
-    let tag = b"cookiecut";
+    let tag = b"piracutter";
     header[..tag.len()].copy_from_slice(tag);
     w.write_all(&header)?;
     w.write_all(&(tris.len() as u32).to_le_bytes())?;

@@ -1,8 +1,8 @@
 [package]
-name = "cookiecut"
+name = "piracutter"
 version = "0.1.0"
 edition = "2021"
-description = "Turns a picture into a printable cookie cutter and matching stamp"
+description = "Transforma uma imagem num cortador de bolachas e carimbo prontos a imprimir"
 license = "MIT"
 
 [dependencies]

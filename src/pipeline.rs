@@ -155,14 +155,14 @@ pub fn stamp_tris(b: &Build, p: &Params) -> Result<Vec<Tri>> {
     Ok(out)
 }
 
-/// Writes `<base>_cutter.stl` and `<base>_stamp.stl`; returns the paths written.
+/// Writes `<base>_cortador.stl` and `<base>_carimbo.stl`; returns the paths written.
 pub fn export(b: &Build, p: &Params, base: &Path) -> Result<Vec<PathBuf>> {
     let stem = base
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("cookie")
-        .trim_end_matches("_cutter")
-        .trim_end_matches("_stamp")
+        .unwrap_or("bolacha")
+        .trim_end_matches("_cortador")
+        .trim_end_matches("_carimbo")
         .to_string();
     let dir = base.parent().unwrap_or(Path::new("."));
     let mut written = Vec::new();
@@ -177,10 +177,10 @@ pub fn export(b: &Build, p: &Params, base: &Path) -> Result<Vec<PathBuf>> {
         Ok(())
     };
     if p.cutter_enabled {
-        save("cutter", cutter_tris(b, p)?)?;
+        save("cortador", cutter_tris(b, p)?)?;
     }
     if p.stamp_enabled {
-        save("stamp", stamp_tris(b, p)?)?;
+        save("carimbo", stamp_tris(b, p)?)?;
     }
     Ok(written)
 }

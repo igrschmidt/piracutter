@@ -921,22 +921,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cookiecut"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "earcutr",
- "eframe",
- "egui",
- "image",
- "imageproc",
- "rfd",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2979,6 +2963,22 @@ dependencies = [
  "atomic-waker",
  "fastrand",
  "futures-io",
+]
+
+[[package]]
+name = "piracutter"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "earcutr",
+ "eframe",
+ "egui",
+ "image",
+ "imageproc",
+ "rfd",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

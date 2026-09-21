@@ -1,26 +1,28 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod render;
 
-use cookiecut::{params, pipeline};
+use piracutter::{params, pipeline};
 
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
-/// Cookie cutter + stamp STL generator. Run without arguments for the GUI.
+/// Gera ficheiros STL de cortador de bolachas e carimbo a partir de uma imagem.
+/// Sem argumentos abre a aplicação com interface.
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Cli {
-    /// Input image (PNG/JPG/WebP/BMP/GIF).
+    /// Imagem de entrada (PNG/JPG/WebP/BMP/GIF).
     input: Option<PathBuf>,
-    /// Output base path; writes <base>_cutter.stl and <base>_stamp.stl. Requires input.
+    /// Caminho base de saída; grava <base>_cortador.stl e <base>_carimbo.stl. Exige a imagem de entrada.
     #[arg(short, long)]
     output: Option<PathBuf>,
-    /// Preset JSON saved from the GUI.
+    /// Predefinição em JSON guardada na aplicação.
     #[arg(short, long)]
     config: Option<PathBuf>,
-    /// Override cookie size in mm.
+    /// Tamanho da bolacha em mm, substituindo o da predefinição.
     #[arg(short, long)]
     size: Option<f32>,
 }
@@ -47,11 +49,11 @@ fn main() -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 820.0])
-            .with_title("cookiecut"),
+            .with_title("PiraCutter"),
         ..Default::default()
     };
     eframe::run_native(
-        "cookiecut",
+        "PiraCutter",
         options,
         Box::new(move |cc| Ok(Box::new(app::App::new(cc, initial)))),
     )
