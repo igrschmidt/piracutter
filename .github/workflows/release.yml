@@ -1,0 +1,78 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install both Mac architectures
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --release
+      - run: cargo build --release --target aarch64-apple-darwin
+      - run: cargo build --release --target x86_64-apple-darwin
+      - name: Bundle the app
+        run: ./packaging/macos/bundle.sh "${GITHUB_REF_NAME#v}"
+      - name: Zip it
+        run: |
+          cp README.md LICENSE dist/
+          cd dist
+          ditto -c -k --keepParent PiraCutter.app PiraCutter.app.zip
+          mkdir -p stage && mv PiraCutter.app.zip README.md LICENSE stage/
+          cd stage && ditto -c -k . ../PiraCutter-macos-universal.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/PiraCutter-macos-universal.zip
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --release
+      - run: cargo build --release --target x86_64-pc-windows-msvc
+      - name: Zip it
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/piracutter.exe dist/
+          Copy-Item README.md, LICENSE dist/
+          Compress-Archive -Path dist/piracutter.exe, dist/README.md, dist/LICENSE `
+            -DestinationPath dist/PiraCutter-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/PiraCutter-windows-x64.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [macos, windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "PiraCutter $GITHUB_REF_NAME" \
+            --notes-file .github/RELEASE_NOTES.md \
+            assets/*.zip

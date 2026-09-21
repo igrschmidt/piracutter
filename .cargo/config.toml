@@ -1,0 +1,4 @@
+# Statically links the C runtime so the Windows build runs on a clean machine
+# without the Visual C++ redistributable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

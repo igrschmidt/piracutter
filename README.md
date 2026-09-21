@@ -29,7 +29,22 @@ dos STL equivalentes e o fatiador abre as duas peças de uma vez.
 **STL** salva um arquivo por peça, terminados em `_cortador.stl` e
 `_carimbo.stl`, para fatiadores mais antigos.
 
-## Instalação
+## Baixar
+
+Os programas prontos estão em
+[Releases](https://github.com/igrschmidt/piracutter/releases). Baixe,
+descompacte e abra. Não precisa instalar mais nada.
+
+- **Windows 10 e 11, 64 bits** — `PiraCutter-windows-x64.zip`. O executável é
+  autocontido e não precisa do Visual C++ Redistributable. Como não tem
+  assinatura digital paga, o Windows mostra um aviso: clique em **Mais
+  informações** e depois em **Executar assim mesmo**.
+- **macOS 11 ou mais novo, Apple ou Intel** — `PiraCutter-macos-universal.zip`.
+  Na primeira vez, clique com o botão direito no aplicativo e escolha
+  **Abrir**, porque ele não é assinado por uma conta paga da Apple. Depois
+  disso abre com duplo clique normal.
+
+## Compilar do código
 
 Precisa do [Rust](https://rustup.rs). Os mesmos comandos no macOS, Windows e
 Linux.
