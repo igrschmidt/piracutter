@@ -52,7 +52,7 @@ pub struct Params {
     pub rim_width: f32,
 
     // contour cleanup
-    pub smooth_iters: u32,
+    pub smooth_mm: f32,
     pub simplify_mm: f32,
 }
 
@@ -87,8 +87,8 @@ impl Default for Params {
             detail_inset: 0.3,
             rim_width: 0.8,
 
-            smooth_iters: 2,
-            simplify_mm: 0.04,
+            smooth_mm: 0.25,
+            simplify_mm: 0.01,
         }
     }
 }

@@ -57,9 +57,10 @@ fn variants() -> Vec<(&'static str, Params)> {
     add("keep_holes", &|p| p.keep_holes = true);
     add("no_mirror", &|p| p.mirror = false);
     add("no_smoothing", &|p| {
-        p.smooth_iters = 0;
+        p.smooth_mm = 0.0;
         p.simplify_mm = 0.0;
     });
+    add("heavy_smoothing", &|p| p.smooth_mm = 0.8);
     add("low_res", &|p| {
         p.px_per_mm = 4.0;
         p.min_blob_mm2 = 2.0;
@@ -92,6 +93,24 @@ fn exports_are_closed_surfaces() {
             assert!(volume(&t) > 0.0, "{name}: stamp volume {}", volume(&t));
         }
     }
+}
+
+/// Smoothing the distance field must not round a real corner away.
+#[test]
+fn sharp_features_survive_smoothing() {
+    let img = sample_image();
+    let span = |p: &Params| {
+        let b = build(&img, p).unwrap();
+        let ys: Vec<f64> = b.blade.iter().flat_map(|q| q.outer.iter().map(|v| v[1])).collect();
+        ys.iter().cloned().fold(f64::MIN, f64::max) - ys.iter().cloned().fold(f64::MAX, f64::min)
+    };
+    let sharp = span(&Params { smooth_mm: 0.0, ..Default::default() });
+    let smoothed = span(&Params::default());
+    assert!(
+        (sharp - smoothed).abs() < 1.0,
+        "default smoothing moved the ear tips by {:.2} mm",
+        (sharp - smoothed).abs()
+    );
 }
 
 /// Winding used to be re-derived per triangle, which read noise off collinear

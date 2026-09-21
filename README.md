@@ -88,11 +88,16 @@ espelhada para o biscoito sair na posição certa.
 linhas em relevo com menos de 0,8 mm não aguentam a impressão, então engrosse
 até aguentarem.
 
-**Resolução** controla o passo do traçado. No padrão de 12 px/mm a ondulação
-do contorno fica em torno de 0,036 mm, bem abaixo do que um bico de 0,4 mm
-consegue resolver, e o contorno sai cerca de 0,076 mm para dentro do desenho
-de cada lado. Subir para 16 ou 20 px/mm reduz os dois números e deixa a prévia
-um pouco mais lenta.
+**Suavização** arredonda o contorno antes de traçar. Sem ela o traçado carrega
+a escadinha dos pixels da imagem e a silhueta fica com quebras visíveis, mesmo
+com o desvio sendo pequeno. No padrão de 0,25 mm a quebra entre segmentos cai
+de cerca de 8,5° para 4,5°, e pontas de verdade como chifres e orelhas
+continuam no lugar. Passar de 0,5 mm começa a arredondar essas pontas.
+
+**Resolução** controla o passo do traçado. O contorno é encaixado na curva com
+precisão de subpixel, então no padrão de 12 px/mm a peça sai a 0,005 mm do
+tamanho do desenho. Subir para 16 ou 20 px/mm ganha pouco e deixa a prévia mais
+lenta.
 
 **Fundo** é lido pela transparência da imagem quando ela existe, e caso
 contrário pela cor ao redor das bordas. Suba a tolerância se sobrarem pedaços
@@ -116,9 +121,9 @@ máquina.
 cargo test
 ```
 
-A suíte gera as duas peças em dezessete combinações de configuração e em
-quatorze resoluções, lê o 3MF de volta e falha se alguma superfície exportada
-não ficar fechada.
+A suíte gera as duas peças em dezoito combinações de configuração e em
+quatorze resoluções, confere que a suavização não come as pontas, lê o 3MF de
+volta e falha se alguma superfície exportada não ficar fechada.
 
 ## Licença
 

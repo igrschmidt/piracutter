@@ -1,4 +1,4 @@
-use crate::geometry::{assemble, intersect, rings, ContourOpts, Field, Polygon, Ring};
+use crate::geometry::{assemble, intersect, ContourOpts, Field, Polygon, Ring};
 use crate::mesh::{cap, extrude, is_meshable, walls, write_stl, Tri};
 use crate::params::Params;
 use crate::segment::{segment, Segmentation};
@@ -31,8 +31,9 @@ pub struct Build {
 pub fn build(img: &RgbaImage, p: &Params) -> Result<Build> {
     let seg = segment(img, p);
     let ppm = seg.ppm;
-    let field = Field::new(&seg.silhouette);
-    let dfield = Field::new(&seg.detail);
+    let sigma = p.smooth_mm * ppm;
+    let field = Field::new(&seg.silhouette).smoothed(sigma);
+    let dfield = Field::new(&seg.detail).smoothed(sigma);
 
     // Smoothing followed by point reduction can nudge two offsets of the same
     // outline across each other on small or intricate shapes. The parts of one
@@ -43,10 +44,9 @@ pub fn build(img: &RgbaImage, p: &Params) -> Result<Build> {
         let opts = ContourOpts {
             ppm,
             mirror: p.mirror,
-            smooth_iters: if relaxed >= 2 { 0 } else { p.smooth_iters },
             simplify_mm: if relaxed >= 1 { 0.0 } else { p.simplify_mm },
         };
-        let level = |mm: f32| -> Vec<Ring> { rings(&field.below(mm, ppm), &opts) };
+        let level = |mm: f32| -> Vec<Ring> { field.rings(mm, &opts) };
 
         base = Vec::new();
         lid_outer = Vec::new();
@@ -83,7 +83,9 @@ pub fn build(img: &RgbaImage, p: &Params) -> Result<Build> {
             }
             let grown = dfield.below(p.detail_expand, ppm);
             let inside = field.below(edge - p.rim_width - p.detail_inset, ppm);
-            detail = assemble(rings(&intersect(&grown, &inside), &opts));
+            detail = assemble(
+                Field::new(&intersect(&grown, &inside)).smoothed(sigma).rings(0.0, &opts),
+            );
         }
 
         let shared_ok = [&base, &lid_outer, &lid_inner, &blade, &plate, &rim]

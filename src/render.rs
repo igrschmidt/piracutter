@@ -158,25 +158,31 @@ fn corner_normals(tris: &[Tri]) -> Vec<[V3; 3]> {
         .map(|t| norm(cross(sub(t[1], t[0]), sub(t[2], t[0]))))
         .collect();
 
-    let mut sums: HashMap<[u32; 3], V3> = HashMap::with_capacity(tris.len());
-    for (t, f) in tris.iter().zip(&faces) {
+    let mut touching: HashMap<[u32; 3], Vec<u32>> = HashMap::with_capacity(tris.len());
+    for (i, t) in tris.iter().enumerate() {
         for v in t {
-            let e = sums.entry(key(*v)).or_insert([0.0; 3]);
-            *e = add(*e, *f);
+            touching.entry(key(*v)).or_default().push(i as u32);
         }
     }
 
+    // Averaging every face at a corner would tilt a flat top wherever a wall
+    // meets it, so only faces already close to this one are taken in.
     let limit = CREASE.cos();
     tris.iter()
-        .zip(&faces)
-        .map(|(t, f)| {
-            let mut out = [*f; 3];
-            for (i, v) in t.iter().enumerate() {
-                if let Some(sum) = sums.get(&key(*v)) {
-                    let smooth = norm(*sum);
-                    if dot(smooth, *f) >= limit {
-                        out[i] = smooth;
+        .enumerate()
+        .map(|(i, t)| {
+            let face = faces[i];
+            let mut out = [face; 3];
+            for (k, v) in t.iter().enumerate() {
+                let Some(neighbours) = touching.get(&key(*v)) else { continue };
+                let mut acc = [0.0f32; 3];
+                for &j in neighbours {
+                    if dot(faces[j as usize], face) >= limit {
+                        acc = add(acc, faces[j as usize]);
                     }
+                }
+                if dot(acc, acc) > 1e-12 {
+                    out[k] = norm(acc);
                 }
             }
             out

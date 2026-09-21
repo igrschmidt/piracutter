@@ -32,6 +32,46 @@ impl Field {
         Field { d: sdf(mask), w, h }
     }
 
+    /// Low-passes the field so its iso-lines stop carrying the pixel grid's
+    /// staircase. Smoothing the polyline afterwards cannot achieve this: the
+    /// wiggle is in the shape being traced, not in how it is traced.
+    pub fn smoothed(&self, sigma_px: f32) -> Field {
+        if sigma_px < 0.05 {
+            return Field { d: self.d.clone(), w: self.w, h: self.h };
+        }
+        let radius = (sigma_px * 3.0).ceil() as i32;
+        let kernel: Vec<f32> = (-radius..=radius)
+            .map(|i| (-(i * i) as f32 / (2.0 * sigma_px * sigma_px)).exp())
+            .collect();
+        let norm: f32 = kernel.iter().sum();
+        let kernel: Vec<f32> = kernel.iter().map(|k| k / norm).collect();
+
+        let (w, h) = (self.w as i32, self.h as i32);
+        let mut pass = vec![0f32; self.d.len()];
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = 0.0;
+                for (k, weight) in kernel.iter().enumerate() {
+                    let sx = (x + k as i32 - radius).clamp(0, w - 1);
+                    acc += self.d[(y * w + sx) as usize] * weight;
+                }
+                pass[(y * w + x) as usize] = acc;
+            }
+        }
+        let mut out = vec![0f32; self.d.len()];
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = 0.0;
+                for (k, weight) in kernel.iter().enumerate() {
+                    let sy = (y + k as i32 - radius).clamp(0, h - 1);
+                    acc += pass[(sy * w + x) as usize] * weight;
+                }
+                out[(y * w + x) as usize] = acc;
+            }
+        }
+        Field { d: out, w: self.w, h: self.h }
+    }
+
     /// Mask of everything within `level` mm of the shape, `level` negative for
     /// erosion. Tracing runs through the centres of the outermost pixels, so
     /// the curve lands about one pixel inside the level asked for; no threshold
@@ -45,6 +85,88 @@ impl Field {
             }
         }
         out
+    }
+}
+
+impl Field {
+    /// Bilinear sample of the distance field, with its gradient, in pixels.
+    fn sample(&self, x: f64, y: f64) -> (f64, [f64; 2]) {
+        let at = |ix: i64, iy: i64| -> f64 {
+            let ix = ix.clamp(0, self.w as i64 - 1) as u32;
+            let iy = iy.clamp(0, self.h as i64 - 1) as u32;
+            self.d[(iy * self.w + ix) as usize] as f64
+        };
+        let value = |x: f64, y: f64| -> f64 {
+            let (x0, y0) = (x.floor(), y.floor());
+            let (fx, fy) = (x - x0, y - y0);
+            let (x0, y0) = (x0 as i64, y0 as i64);
+            let top = at(x0, y0) * (1.0 - fx) + at(x0 + 1, y0) * fx;
+            let bot = at(x0, y0 + 1) * (1.0 - fx) + at(x0 + 1, y0 + 1) * fx;
+            top * (1.0 - fy) + bot * fy
+        };
+        let v = value(x, y);
+        let gx = (value(x + 0.5, y) - value(x - 0.5, y)) / 1.0;
+        let gy = (value(x, y + 0.5) - value(x, y - 0.5)) / 1.0;
+        (v, [gx, gy])
+    }
+
+    /// Slides each point onto the real iso-line. Tracing can only return pixel
+    /// centres, so without this every outline carries the grid's staircase.
+    fn snap(&self, pts: &mut [[f64; 2]], target_px: f64) {
+        for _ in 0..3 {
+            for p in pts.iter_mut() {
+                let (v, g) = self.sample(p[0], p[1]);
+                let len = (g[0] * g[0] + g[1] * g[1]).sqrt();
+                if len < 1e-6 {
+                    continue;
+                }
+                let step = ((v - target_px) / len).clamp(-2.0, 2.0);
+                p[0] -= g[0] / len * step;
+                p[1] -= g[1] / len * step;
+            }
+        }
+    }
+
+    /// Every contour of the shape grown to `level_mm`, in mm. Nesting is
+    /// re-derived by `assemble`, so rings from different levels can be
+    /// combined into one solid.
+    pub fn rings(&self, level_mm: f32, o: &ContourOpts) -> Vec<Ring> {
+        let mask = fill_diagonal_pinches(&self.below(level_mm, o.ppm));
+        let target = (level_mm * o.ppm) as f64;
+        let h = mask.height() as f64;
+        let ppm = o.ppm as f64;
+        find_contours::<i32>(&mask)
+            .iter()
+            .filter_map(|c| {
+                let mut pts: Vec<[f64; 2]> =
+                    c.points.iter().map(|p| [p.x as f64, p.y as f64]).collect();
+                if pts.len() < 3 {
+                    return None;
+                }
+                // Spurs are exact duplicates while the points are still on the
+                // grid, so they have to go before anything moves.
+                remove_spurs(&mut pts);
+                if pts.len() < 3 {
+                    return None;
+                }
+                self.snap(&mut pts, target);
+
+                #[allow(unused_mut)]
+                let mut ring: Ring = pts
+                    .iter()
+                    .map(|p| {
+                        let y = if o.mirror { p[1] } else { h - p[1] };
+                        [p[0] / ppm, y / ppm]
+                    })
+                    .collect();
+                // One corner-cutting pass tidies the polyline; the shape itself
+                // was already smoothed in the field.
+                let ring = rdp_closed(&chaikin(&ring), o.simplify_mm as f64);
+                let mut ring = ring;
+                dedup(&mut ring);
+                (ring.len() >= 3 && signed_area(&ring).abs() > 1e-6).then_some(ring)
+            })
+            .collect()
     }
 }
 
@@ -98,40 +220,7 @@ pub struct Polygon {
 pub struct ContourOpts {
     pub ppm: f32,
     pub mirror: bool,
-    pub smooth_iters: u32,
     pub simplify_mm: f32,
-}
-
-/// Every contour of `mask`, in mm, without nesting. Nesting is re-derived by
-/// `assemble`, so rings from different masks can be combined into one solid.
-pub fn rings(mask: &GrayImage, o: &ContourOpts) -> Vec<Ring> {
-    let h = mask.height() as f64;
-    let ppm = o.ppm as f64;
-    let mask = fill_diagonal_pinches(mask);
-    find_contours::<i32>(&mask)
-        .iter()
-        .filter_map(|c| {
-            let mut ring: Ring = c
-                .points
-                .iter()
-                .map(|p| {
-                    let x = p.x as f64 / ppm;
-                    let y = if o.mirror { p.y as f64 / ppm } else { (h - p.y as f64) / ppm };
-                    [x, y]
-                })
-                .collect();
-            if ring.len() < 3 {
-                return None;
-            }
-            remove_spurs(&mut ring);
-            for _ in 0..o.smooth_iters {
-                ring = chaikin(&ring);
-            }
-            ring = rdp_closed(&ring, o.simplify_mm as f64);
-            dedup(&mut ring);
-            (ring.len() >= 3 && signed_area(&ring).abs() > 1e-6).then_some(ring)
-        })
-        .collect()
 }
 
 /// Groups rings into polygons by containment: a ring nested an even number of

@@ -43,7 +43,7 @@ pub struct App {
 
 /// Bumped whenever a default changes, so a saved session does not keep
 /// serving values the new build no longer considers sensible.
-const SETTINGS_VERSION: u32 = 2;
+const SETTINGS_VERSION: u32 = 3;
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>) -> Self {
@@ -248,8 +248,8 @@ impl App {
 
         ui.separator();
         ui.heading("Curvas");
-        s!(ui, p.smooth_iters, 0..=4, "Suavização", "", "Passagens de Chaikin sobre os contornos traçados.");
-        s!(ui, p.simplify_mm, 0.0..=0.3, "Simplificação", " mm", "Tolerância na redução de pontos. Quanto menor, maior o arquivo.");
+        s!(ui, p.smooth_mm, 0.0..=1.0, "Suavização", " mm", "Arredonda o contorno antes de traçar, apagando a escadinha dos pixels da imagem. Valores altos também arredondam pontas de verdade, como chifres e orelhas.");
+        s!(ui, p.simplify_mm, 0.0..=0.1, "Simplificação", " mm", "Tolerância na redução de pontos. Quanto menor, mais suave a silhueta e maior o arquivo.");
 
         ui.separator();
         ui.horizontal(|ui| {
