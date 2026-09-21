@@ -1,6 +1,6 @@
 [package]
 name = "piracutter"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Transforma uma imagem em cortador de biscoitos e carimbo prontos para imprimir"
 license = "MIT"

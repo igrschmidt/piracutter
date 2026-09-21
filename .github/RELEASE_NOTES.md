@@ -13,9 +13,10 @@ depois em **Executar assim mesmo**.
 
 ## macOS
 
-Baixe `PiraCutter-macos-universal.zip`, descompacte e arraste `PiraCutter.app`
-para onde quiser. Funciona em Mac com chip Apple e com Intel, a partir do
-macOS 11.
+Baixe `PiraCutter-macos-apple-silicon.zip`, descompacte e arraste
+`PiraCutter.app` para onde quiser. É para Mac com chip Apple (M1 em diante), a
+partir do macOS 11. Mac com Intel não é atendido: compile do código se
+precisar.
 
 Na primeira vez, clique com o botão direito no aplicativo e escolha **Abrir**,
 e confirme no aviso. Um duplo clique normal vai ser bloqueado, porque o

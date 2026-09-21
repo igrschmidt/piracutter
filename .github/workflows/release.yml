@@ -16,12 +16,10 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - name: Install both Mac architectures
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - run: rustup target add aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --release
       - run: cargo build --release --target aarch64-apple-darwin
-      - run: cargo build --release --target x86_64-apple-darwin
       - name: Bundle the app
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
@@ -32,11 +30,11 @@ jobs:
           # ditto, not zip, so the bundle and its signature survive the trip.
           ditto dist/PiraCutter.app dist/stage/PiraCutter.app
           cp README.md LICENSE dist/stage/
-          ditto -c -k --sequesterRsrc dist/stage dist/PiraCutter-macos-universal.zip
+          ditto -c -k --sequesterRsrc dist/stage dist/PiraCutter-macos-apple-silicon.zip
       - uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: dist/PiraCutter-macos-universal.zip
+          path: dist/PiraCutter-macos-apple-silicon.zip
           if-no-files-found: error
 
   windows:

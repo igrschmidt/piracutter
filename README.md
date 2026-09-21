@@ -39,10 +39,11 @@ descompacte e abra. Não precisa instalar mais nada.
   autocontido e não precisa do Visual C++ Redistributable. Como não tem
   assinatura digital paga, o Windows mostra um aviso: clique em **Mais
   informações** e depois em **Executar assim mesmo**.
-- **macOS 11 ou mais novo, Apple ou Intel** — `PiraCutter-macos-universal.zip`.
+- **macOS 11 ou mais novo, chip Apple** — `PiraCutter-macos-apple-silicon.zip`.
   Na primeira vez, clique com o botão direito no aplicativo e escolha
   **Abrir**, porque ele não é assinado por uma conta paga da Apple. Depois
-  disso abre com duplo clique normal.
+  disso abre com duplo clique normal. Mac com Intel precisa compilar do
+  código.
 
 ## Compilar do código
 
