@@ -3,26 +3,28 @@
 mod app;
 mod render;
 
+use piracutter::pipeline::Format;
 use piracutter::{params, pipeline};
 
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
-/// Gera ficheiros STL de cortador de bolachas e carimbo a partir de uma imagem.
-/// Sem argumentos abre a aplicação com interface.
+/// Gera cortador de biscoitos e carimbo a partir de uma imagem, em 3MF ou STL.
+/// Sem argumentos, abre o aplicativo com interface.
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Cli {
     /// Imagem de entrada (PNG/JPG/WebP/BMP/GIF).
     input: Option<PathBuf>,
-    /// Caminho base de saída; grava <base>_cortador.stl e <base>_carimbo.stl. Exige a imagem de entrada.
+    /// Caminho de saída. Terminando em .3mf, salva as duas peças em um só arquivo;
+    /// caso contrário salva <base>_cortador.stl e <base>_carimbo.stl.
     #[arg(short, long)]
     output: Option<PathBuf>,
-    /// Predefinição em JSON guardada na aplicação.
+    /// Predefinição em JSON salva no aplicativo.
     #[arg(short, long)]
     config: Option<PathBuf>,
-    /// Tamanho da bolacha em mm, substituindo o da predefinição.
+    /// Tamanho do biscoito em mm, no lugar do valor da predefinição.
     #[arg(short, long)]
     size: Option<f32>,
 }
@@ -39,7 +41,7 @@ fn main() -> Result<()> {
         }
         let img = pipeline::load_image(input)?;
         let b = pipeline::build(&img, &params)?;
-        for p in pipeline::export(&b, &params, output)? {
+        for p in pipeline::export(&b, &params, output, Format::from_path(output))? {
             println!("{}", p.display());
         }
         return Ok(());

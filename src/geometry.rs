@@ -32,7 +32,10 @@ impl Field {
         Field { d: sdf(mask), w, h }
     }
 
-    /// Mask of everything within `level` mm of the shape, `level` negative for erosion.
+    /// Mask of everything within `level` mm of the shape, `level` negative for
+    /// erosion. Tracing runs through the centres of the outermost pixels, so
+    /// the curve lands about one pixel inside the level asked for; no threshold
+    /// nudge fixes that, since the discrete field steps straight from -1 to +1.
     pub fn below(&self, level_mm: f32, ppm: f32) -> GrayImage {
         let t = level_mm * ppm;
         let mut out = GrayImage::new(self.w, self.h);

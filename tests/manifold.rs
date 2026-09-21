@@ -1,6 +1,6 @@
 use piracutter::mesh::Tri;
 use piracutter::params::{Params, SizeMode};
-use piracutter::pipeline::{build, cutter_tris, stamp_tris};
+use piracutter::pipeline::{build, cutter_tris, stamp_tris, Format};
 use image::{Rgba, RgbaImage};
 use std::collections::HashMap;
 
@@ -60,7 +60,6 @@ fn variants() -> Vec<(&'static str, Params)> {
         p.smooth_iters = 0;
         p.simplify_mm = 0.0;
     });
-    add("high_res", &|p| p.px_per_mm = 16.0);
     add("low_res", &|p| {
         p.px_per_mm = 4.0;
         p.min_blob_mm2 = 2.0;
@@ -91,6 +90,26 @@ fn exports_are_closed_surfaces() {
             assert!(!t.is_empty(), "{name}: stamp empty");
             assert_eq!(open_edges(&t), 0, "{name}: stamp is not closed");
             assert!(volume(&t) > 0.0, "{name}: stamp volume {}", volume(&t));
+        }
+    }
+}
+
+/// Winding used to be re-derived per triangle, which read noise off collinear
+/// slivers and silently emptied the export at most resolutions.
+#[test]
+fn every_resolution_produces_a_model() {
+    let img = sample_image();
+    for ppm in [4.0f32, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 16.0, 18.0, 20.0] {
+        let p = Params { px_per_mm: ppm, ..Default::default() };
+        let b = build(&img, &p).unwrap();
+        assert_eq!(b.blade.len(), 1, "{ppm} px/mm: blade missing");
+        assert_eq!(b.plate.len(), 1, "{ppm} px/mm: plate missing");
+        assert!(b.detail.len() > 8, "{ppm} px/mm: only {} detail shapes", b.detail.len());
+        for (part, tris) in [
+            ("cutter", cutter_tris(&b, &p).unwrap()),
+            ("stamp", stamp_tris(&b, &p).unwrap()),
+        ] {
+            assert_eq!(open_edges(&tris), 0, "{ppm} px/mm: {part} is not closed");
         }
     }
 }
@@ -131,4 +150,63 @@ fn size_setting_measures_the_artwork_not_the_canvas() {
             );
         }
     }
+}
+
+/// The 3MF writer welds shared corners, so the file has to be read back to
+/// confirm the indexed mesh is still a closed surface.
+#[test]
+fn three_mf_holds_both_parts_as_closed_meshes() {
+    let p = Params::default();
+    let b = build(&sample_image(), &p).unwrap();
+    let dir = std::env::temp_dir().join("piracutter-test-3mf");
+    std::fs::create_dir_all(&dir).unwrap();
+    let written =
+        piracutter::pipeline::export(&b, &p, &dir.join("peca.3mf"), Format::ThreeMf).unwrap();
+    assert_eq!(written.len(), 1, "3MF should be a single file");
+
+    let file = std::fs::File::open(&written[0]).unwrap();
+    let mut zip = zip::ZipArchive::new(file).unwrap();
+    for required in ["[Content_Types].xml", "_rels/.rels", "3D/3dmodel.model"] {
+        assert!(zip.by_name(required).is_ok(), "missing {required}");
+    }
+    let xml = {
+        let mut s = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("3D/3dmodel.model").unwrap(), &mut s)
+            .unwrap();
+        s
+    };
+
+    let objects: Vec<&str> = xml.split("<object ").skip(1).collect();
+    assert_eq!(objects.len(), 2, "expected a cutter and a stamp");
+    assert!(xml.contains("name=\"Cortador\""));
+    assert!(xml.contains("name=\"Carimbo\""));
+
+    for obj in objects {
+        let count = |tag: &str| obj.matches(tag).count();
+        let verts = count("<vertex ");
+        let faces = count("<triangle ");
+        assert!(verts > 100 && faces > 100, "object looks empty");
+        // Welding should leave roughly two faces per corner, not one per face.
+        assert!(faces < 3 * verts, "vertices were not welded: {verts} for {faces} faces");
+
+        let mut edges: HashMap<(u32, u32), i32> = HashMap::new();
+        for t in obj.split("<triangle ").skip(1) {
+            let idx: Vec<u32> = ["v1=\"", "v2=\"", "v3=\""]
+                .iter()
+                .map(|k| {
+                    let rest = &t[t.find(k).unwrap() + k.len()..];
+                    rest[..rest.find('"').unwrap()].parse().unwrap()
+                })
+                .collect();
+            for i in 0..3 {
+                *edges.entry((idx[i], idx[(i + 1) % 3])).or_insert(0) += 1;
+            }
+        }
+        let open = edges
+            .iter()
+            .filter(|(&(a, b), &n)| n != 1 || edges.get(&(b, a)).copied().unwrap_or(0) != 1)
+            .count();
+        assert_eq!(open, 0, "welded mesh has {open} unmatched edges");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -1,4 +1,4 @@
-use crate::geometry::{signed_area, Polygon};
+use crate::geometry::Polygon;
 use anyhow::{anyhow, Result};
 use std::collections::HashSet;
 use std::io::Write;
@@ -20,15 +20,11 @@ pub fn cap(poly: &Polygon, z: f32, up: bool, out: &mut Vec<Tri>) -> Result<()> {
     }
     let tris = earcutr::earcut(&flat, &hole_idx, 2).map_err(|e| anyhow!("triangulation: {e:?}"))?;
     let pt = |i: usize| [flat[2 * i] as f32, flat[2 * i + 1] as f32, z];
+    // Ear clipping keeps the outer ring's winding, which `assemble` has already
+    // made counter-clockwise. Re-deriving it per triangle would read noise off
+    // the collinear slivers the clipper emits and flip them at random.
     for t in tris.chunks_exact(3) {
-        let (a, b, c) = (t[0], t[1], t[2]);
-        let ring = [
-            [flat[2 * a], flat[2 * a + 1]],
-            [flat[2 * b], flat[2 * b + 1]],
-            [flat[2 * c], flat[2 * c + 1]],
-        ];
-        let ccw = signed_area(&ring) > 0.0;
-        let (a, b, c) = if ccw == up { (a, b, c) } else { (a, c, b) };
+        let (a, b, c) = if up { (t[0], t[1], t[2]) } else { (t[0], t[2], t[1]) };
         out.push([pt(a), pt(b), pt(c)]);
     }
     Ok(())
@@ -79,16 +75,6 @@ pub fn is_meshable(poly: &Polygon) -> bool {
     };
     let mut seen: HashSet<(usize, usize)> = HashSet::with_capacity(tris.len());
     for t in tris.chunks_exact(3) {
-        let ring = [
-            [flat[2 * t[0]], flat[2 * t[0] + 1]],
-            [flat[2 * t[1]], flat[2 * t[1] + 1]],
-            [flat[2 * t[2]], flat[2 * t[2] + 1]],
-        ];
-        let t = if signed_area(&ring) > 0.0 {
-            [t[0], t[1], t[2]]
-        } else {
-            [t[0], t[2], t[1]]
-        };
         for i in 0..3 {
             if !seen.insert((t[i], t[(i + 1) % 3])) {
                 return false;

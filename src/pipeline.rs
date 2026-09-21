@@ -2,6 +2,7 @@ use crate::geometry::{assemble, intersect, rings, ContourOpts, Field, Polygon, R
 use crate::mesh::{cap, extrude, is_meshable, walls, write_stl, Tri};
 use crate::params::Params;
 use crate::segment::{segment, Segmentation};
+use crate::threemf;
 use anyhow::{Context, Result};
 use image::RgbaImage;
 use std::path::{Path, PathBuf};
@@ -155,34 +156,71 @@ pub fn stamp_tris(b: &Build, p: &Params) -> Result<Vec<Tri>> {
     Ok(out)
 }
 
-/// Writes `<base>_cortador.stl` and `<base>_carimbo.stl`; returns the paths written.
-pub fn export(b: &Build, p: &Params, base: &Path) -> Result<Vec<PathBuf>> {
-    let stem = base
+/// STL keeps one solid per file; 3MF carries both named parts in one.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Format {
+    Stl,
+    ThreeMf,
+}
+
+impl Format {
+    /// Picks the format from the file name, defaulting to STL.
+    pub fn from_path(path: &Path) -> Self {
+        match path.extension().and_then(|e| e.to_str()) {
+            Some(e) if e.eq_ignore_ascii_case("3mf") => Format::ThreeMf,
+            _ => Format::Stl,
+        }
+    }
+}
+
+/// Writes the enabled parts and returns the paths written. STL gets one file
+/// per part, suffixed `_cortador` and `_carimbo`; 3MF gets a single file.
+pub fn export(b: &Build, p: &Params, target: &Path, format: Format) -> Result<Vec<PathBuf>> {
+    let stem = target
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("bolacha")
+        .unwrap_or("biscoito")
         .trim_end_matches("_cortador")
         .trim_end_matches("_carimbo")
         .to_string();
-    let dir = base.parent().unwrap_or(Path::new("."));
-    let mut written = Vec::new();
-    let mut save = |suffix: &str, tris: Vec<Tri>| -> Result<()> {
-        if tris.is_empty() {
-            return Ok(());
+    let dir = target.parent().unwrap_or(Path::new("."));
+
+    let cutter = if p.cutter_enabled { cutter_tris(b, p)? } else { Vec::new() };
+    let stamp = if p.stamp_enabled { stamp_tris(b, p)? } else { Vec::new() };
+
+    match format {
+        Format::Stl => {
+            let mut written = Vec::new();
+            for (suffix, tris) in [("cortador", &cutter), ("carimbo", &stamp)] {
+                if tris.is_empty() {
+                    continue;
+                }
+                let path = dir.join(format!("{stem}_{suffix}.stl"));
+                let f = std::fs::File::create(&path)
+                    .with_context(|| format!("create {}", path.display()))?;
+                write_stl(std::io::BufWriter::new(f), tris)?;
+                written.push(path);
+            }
+            Ok(written)
         }
-        let path = dir.join(format!("{stem}_{suffix}.stl"));
-        let f = std::fs::File::create(&path).with_context(|| format!("create {}", path.display()))?;
-        write_stl(std::io::BufWriter::new(f), &tris)?;
-        written.push(path);
-        Ok(())
-    };
-    if p.cutter_enabled {
-        save("cortador", cutter_tris(b, p)?)?;
+        Format::ThreeMf => {
+            let mut objects = Vec::new();
+            if !cutter.is_empty() {
+                objects.push(threemf::Object { name: "Cortador", tris: &cutter });
+            }
+            if !stamp.is_empty() {
+                objects.push(threemf::Object { name: "Carimbo", tris: &stamp });
+            }
+            if objects.is_empty() {
+                return Ok(Vec::new());
+            }
+            let path = dir.join(format!("{stem}.3mf"));
+            let f = std::fs::File::create(&path)
+                .with_context(|| format!("create {}", path.display()))?;
+            threemf::write(std::io::BufWriter::new(f), &objects)?;
+            Ok(vec![path])
+        }
     }
-    if p.stamp_enabled {
-        save("carimbo", stamp_tris(b, p)?)?;
-    }
-    Ok(written)
 }
 
 pub fn load_image(path: &Path) -> Result<RgbaImage> {

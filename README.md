@@ -1,28 +1,37 @@
 # PiraCutter
 
-Transforma uma imagem plana em dois ficheiros STL prontos a imprimir: um
-cortador de bolachas e o carimbo que marca o desenho na massa.
+Transforma uma imagem plana em duas peças prontas para imprimir: um cortador
+de biscoitos e o carimbo que marca o desenho na massa.
 
-É uma aplicação de secretária com pré-visualização em 3D, e também funciona
-por linha de comandos para trabalhos em série. Corre tudo localmente, nada é
-enviado para lado nenhum e não há inteligência artificial pelo meio. O
-contorno é traçado a partir da imagem e afastado com um campo de distâncias,
-por isso a mesma imagem dá sempre a mesma geometria.
+É um aplicativo de desktop com prévia em 3D, e também funciona pela linha de
+comando para trabalhos em lote. Roda tudo localmente, nada é enviado para
+lugar nenhum e não tem inteligência artificial envolvida. O contorno é traçado
+a partir da imagem e afastado com um campo de distâncias, então a mesma imagem
+sempre dá a mesma geometria.
 
 ## O que sai
 
-Dê-lhe uma ilustração plana com fundo liso, do género de clipart ou logótipo.
+Dê a ele uma ilustração plana com fundo liso, do tipo clipart ou logotipo.
 
-- **Cortador** — a lâmina assente numa aba onde faz pressão com a mão.
+- **Cortador** — a lâmina apoiada em uma aba onde você faz pressão com a mão.
 - **Carimbo** — uma placa que entra dentro do cortador, com o contorno em
   relevo e todas as linhas e manchas escuras do desenho.
 
-As duas peças são exportadas como superfícies fechadas, por isso o laminador
-aceita-as sem passo de reparação.
+As duas peças saem como superfícies fechadas, então o fatiador aceita sem
+passo de reparo.
+
+## Formatos
+
+**3MF** é o padrão e sai em um único arquivo, com as duas peças nomeadas
+Cortador e Carimbo, compactado. Costuma ficar em menos da metade do tamanho
+dos STL equivalentes e o fatiador abre as duas peças de uma vez.
+
+**STL** salva um arquivo por peça, terminados em `_cortador.stl` e
+`_carimbo.stl`, para fatiadores mais antigos.
 
 ## Instalação
 
-Precisa do [Rust](https://rustup.rs). Os mesmos comandos em macOS, Windows e
+Precisa do [Rust](https://rustup.rs). Os mesmos comandos no macOS, Windows e
 Linux.
 
 ```
@@ -32,53 +41,62 @@ cargo build --release
 O executável fica em `target/release/piracutter` (`piracutter.exe` no
 Windows).
 
-Em Linux são ainda precisos os cabeçalhos habituais do sistema de janelas, por
-exemplo `libxkbcommon-dev libgtk-3-dev` em Debian e Ubuntu.
+No Linux também são necessários os cabeçalhos do sistema de janelas, por
+exemplo `libxkbcommon-dev libgtk-3-dev` no Debian e no Ubuntu.
 
-## Utilização
+## Uso
 
-Faça duplo clique no executável, ou corra-o sem argumentos, para abrir a
-aplicação. Abra uma imagem ou largue-a na janela, mexa nos controlos e carregue
-em Exportar STL. São gravados dois ficheiros junto do nome que escolher,
-terminados em `_cortador.stl` e `_carimbo.stl`. As definições ficam guardadas
-entre sessões, e as predefinições gravam-se em JSON.
+Dê um duplo clique no executável, ou rode sem argumentos, para abrir o
+aplicativo. Abra uma imagem ou solte ela na janela, ajuste os controles e
+clique em Exportar. As configurações ficam salvas entre sessões, e as
+predefinições são salvas em JSON.
 
-Para trabalhos em série:
+Para trabalhos em lote:
 
 ```
-piracutter leopardo.png -o leopardo.stl
-piracutter leopardo.png -o leopardo.stl --size 65
-piracutter leopardo.png -o leopardo.stl --config festa.json
+piracutter onca.png -o onca.3mf
+piracutter onca.png -o onca.stl
+piracutter onca.png -o onca.3mf --size 65
+piracutter onca.png -o onca.3mf --config festa.json
 ```
 
-## Vistas
+A extensão do arquivo de saída escolhe o formato.
+
+## Visualização
 
 A vista **3D** mostra as duas peças sólidas sobre a mesa de impressão. Arraste
-para rodar, arraste com o botão direito para deslocar, use a roda do rato para
-ampliar e faça duplo clique para enquadrar. Desligue **lado a lado** para ver o
-carimbo encaixado dentro do cortador, como as peças assentam uma na outra.
+para girar, arraste com o botão direito para deslocar, use a roda do mouse
+para aproximar e dê um clique duplo para enquadrar. Desligue **lado a lado**
+para ver o carimbo encaixado dentro do cortador, do jeito que as peças se
+encaixam.
 
 A vista **Contornos** mostra os traçados por cima da imagem segmentada, útil
-para perceber o que foi lido como fundo e o que passou a detalhe.
+para entender o que foi lido como fundo e o que virou detalhe.
 
-## Definições que vale a pena conhecer
+## Configurações que valem a pena conhecer
 
-**Tamanho da bolacha** é medido no desenho, não no ficheiro de imagem, por isso
-o espaço vazio à volta da imagem não encolhe o resultado. Escolha se se aplica
-à largura, à altura ou ao maior lado.
+**Tamanho do biscoito** é medido no desenho, não no arquivo de imagem, então o
+espaço vazio ao redor da imagem não encolhe o resultado. Escolha se vale para
+a largura, para a altura ou para o maior lado.
 
-**Espelhar geometria** vem ligado e deve ficar assim. O carimbo é pressionado
-virado para baixo, por isso a peça impressa tem de ser a imagem espelhada para
-a bolacha sair na posição certa.
+**Espelhar geometria** já vem ligado e deve continuar assim. O carimbo é
+pressionado virado para baixo, então a peça impressa precisa ser a imagem
+espelhada para o biscoito sair na posição certa.
 
-**Espessura da lâmina** a 0,8 mm imprime duas paredes limpas com um bico de
-0,4 mm. **Engrossar detalhe** conta sobretudo em desenhos carregados: linhas em
-relevo com menos de 0,8 mm não aguentam a impressão, por isso engrosse-as até
-aguentarem.
+**Espessura da lâmina** em 0,8 mm imprime duas paredes limpas com bico de
+0,4 mm. **Engrossar detalhe** conta principalmente em desenhos carregados:
+linhas em relevo com menos de 0,8 mm não aguentam a impressão, então engrosse
+até aguentarem.
 
-**Fundo** é lido a partir da transparência da imagem quando ela existe, e caso
-contrário a partir da cor à volta das margens. Suba a tolerância se sobrarem
-pedaços de fundo, baixe-a se o desenho estiver a ser comido.
+**Resolução** controla o passo do traçado. No padrão de 12 px/mm a ondulação
+do contorno fica em torno de 0,036 mm, bem abaixo do que um bico de 0,4 mm
+consegue resolver, e o contorno sai cerca de 0,076 mm para dentro do desenho
+de cada lado. Subir para 16 ou 20 px/mm reduz os dois números e deixa a prévia
+um pouco mais lenta.
+
+**Fundo** é lido pela transparência da imagem quando ela existe, e caso
+contrário pela cor ao redor das bordas. Suba a tolerância se sobrarem pedaços
+de fundo, baixe se o desenho estiver sendo comido.
 
 Se a barra de estado falar em formas deixadas de fora, algum detalhe ficou
 emaranhado demais para virar sólido. Subir a resolução, engrossar o detalhe ou
@@ -86,10 +104,10 @@ subir a área mínima do detalhe costuma resolver.
 
 ## Impressão
 
-Imprima as duas peças deitadas na mesa, sem suportes. O cortador quer zero
-camadas sólidas no topo e dois ou três perímetros. Quanto a segurança
-alimentar vale o costume para cortadores impressos: use filamento próprio ou
-selado, lave à mão e trate-os como utensílios de ocasião e não como loiça de
+Imprima as duas peças deitadas na mesa, sem suportes. O cortador pede zero
+camadas sólidas no topo e dois ou três perímetros. Sobre segurança alimentar
+vale o de sempre para cortadores impressos: use filamento próprio ou selado,
+lave à mão e trate as peças como utensílio de ocasião, não como louça de
 máquina.
 
 ## Testes
@@ -98,8 +116,9 @@ máquina.
 cargo test
 ```
 
-A bateria gera as duas peças em dezassete combinações de definições e falha se
-alguma superfície exportada não ficar fechada.
+A suíte gera as duas peças em dezessete combinações de configuração e em
+quatorze resoluções, lê o 3MF de volta e falha se alguma superfície exportada
+não ficar fechada.
 
 ## Licença
 

@@ -1,7 +1,7 @@
 use crate::render::{self, Camera, Part};
 use piracutter::geometry::Polygon;
 use piracutter::params::{BgMode, Params, SizeMode};
-use piracutter::pipeline::{build, cutter_tris, export, load_image, stamp_tris, Build};
+use piracutter::pipeline::{build, cutter_tris, export, load_image, stamp_tris, Build, Format};
 use egui::{Color32, Pos2, Rect, Stroke, Vec2};
 use std::path::PathBuf;
 
@@ -38,6 +38,7 @@ pub struct App {
     show_plate_grid: bool,
     /// Framing needs the viewport shape, so it waits for the next paint.
     fit_pending: bool,
+    format: Format,
 }
 
 impl App {
@@ -52,7 +53,7 @@ impl App {
             image_path: None,
             result: None,
             seg_tex: None,
-            status: "Abra uma imagem com o botão Abrir imagem, ou largue o ficheiro nesta janela.".into(),
+            status: "Abra uma imagem no botão Abrir imagem, ou solte o arquivo nesta janela.".into(),
             dirty: false,
             show_seg: true,
             show_blade: true,
@@ -71,6 +72,7 @@ impl App {
             show_stamp_3d: true,
             show_plate_grid: true,
             fit_pending: false,
+            format: Format::ThreeMf,
         };
         if let Some(p) = initial {
             app.open(p);
@@ -111,9 +113,9 @@ impl App {
                 ) + &match (b.relaxed, b.dropped) {
                     (0, 0) => String::new(),
                     (r, 0) => format!(" Suavização reduzida ({r}) para manter os contornos afastados."),
-                    (0, d) => format!(" {d} forma(s) demasiado emaranhada(s) para gerar sólido, deixada(s) de fora."),
+                    (0, d) => format!(" {d} forma(s) emaranhada(s) demais para virar sólido, deixada(s) de fora."),
                     (r, d) => format!(
-                        " Suavização reduzida ({r}); {d} forma(s) demasiado emaranhada(s) para gerar sólido, deixada(s) de fora."
+                        " Suavização reduzida ({r}); {d} forma(s) emaranhada(s) demais para virar sólido, deixada(s) de fora."
                     ),
                 };
                 let first = self.parts.is_empty();
@@ -138,19 +140,26 @@ impl App {
             .unwrap_or("bolacha")
             .to_string();
         let mut dlg = rfd::FileDialog::new()
-            .set_file_name(format!("{suggested}.stl"))
+            .set_file_name(format!("{suggested}.{}", self.format_ext()))
+            .add_filter("3MF", &["3mf"])
             .add_filter("STL", &["stl"]);
         if let Some(dir) = self.image_path.as_ref().and_then(|p| p.parent()) {
             dlg = dlg.set_directory(dir);
         }
         if let Some(path) = dlg.save_file() {
-            match export(b, &self.params, &path) {
+            // The chosen extension wins, so the dialog's own format picker works.
+            let format = if path.extension().is_some() {
+                Format::from_path(&path)
+            } else {
+                self.format
+            };
+            match export(b, &self.params, &path, format) {
                 Ok(paths) => {
                     let names: Vec<String> = paths
                         .iter()
                         .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
                         .collect();
-                    self.status = format!("Ficheiros gravados: {}", names.join(", "));
+                    self.status = format!("Arquivos salvos: {}", names.join(", "));
                 }
                 Err(e) => self.status = format!("Falha ao exportar: {e:#}"),
             }
@@ -170,7 +179,7 @@ impl App {
         }
 
         ui.heading("Tamanho");
-        s!(ui, p.size_mm, 15.0..=250.0, "Tamanho da bolacha", " mm", "Medido no próprio desenho. O espaço vazio à volta da imagem é ignorado, e a aba acrescenta a este valor.");
+        s!(ui, p.size_mm, 15.0..=250.0, "Tamanho do biscoito", " mm", "Medido no próprio desenho. O espaço vazio ao redor da imagem é ignorado, e a aba soma a esse valor.");
         egui::ComboBox::from_label("Medido em")
             .selected_text(match p.size_mode {
                 SizeMode::Width => "largura",
@@ -186,10 +195,10 @@ impl App {
                     changed |= ui.selectable_value(&mut p.size_mode, m, label).changed();
                 }
             });
-        s!(ui, p.px_per_mm, 3.0..=20.0, "Resolução", " px/mm", "Mais alto dá curvas mais suaves e demora mais. 8 chega bem para impressão.");
+        s!(ui, p.px_per_mm, 3.0..=20.0, "Resolução", " px/mm", "Passo do traçado do contorno. Valores maiores dão curvas mais suaves e demoram mais. 12 já cobre bem um bico de 0,4 mm.");
         changed |= ui
             .checkbox(&mut p.mirror, "Espelhar geometria")
-            .on_hover_text("Deixe ligado. As peças são viradas ao carimbar a massa, por isso o modelo tem de ser a imagem espelhada.")
+            .on_hover_text("Deixe ligado. As peças são viradas na hora de carimbar a massa, então o modelo precisa ser a imagem espelhada.")
             .changed();
 
         ui.separator();
@@ -201,49 +210,49 @@ impl App {
                     changed |= ui.selectable_value(&mut p.bg_mode, m, bg_label(m)).changed();
                 }
             });
-        s!(ui, p.bg_tolerance, 0.01..=0.6, "Tolerância do fundo", "", "Quanto uma cor pode diferir da cor das margens da imagem e ainda contar como fundo.");
+        s!(ui, p.bg_tolerance, 0.01..=0.6, "Tolerância do fundo", "", "O quanto uma cor pode diferir da cor das bordas da imagem e ainda contar como fundo.");
         changed |= ui
             .checkbox(&mut p.keep_holes, "Manter buracos fechados")
-            .on_hover_text("Desligado: o fundo preso dentro da forma passa a fazer parte da bolacha. Ligado: passa a ser um buraco com lâmina própria.")
+            .on_hover_text("Desligado: o fundo preso dentro da forma vira parte do biscoito. Ligado: vira um buraco com lâmina própria.")
             .changed();
-        s!(ui, p.detail_threshold, 0..=255, "Escuridão do detalhe", "", "Os pixels mais escuros do que este valor passam a linhas em relevo no carimbo.");
-        s!(ui, p.min_blob_mm2, 0.0..=20.0, "Área mínima da forma", " mm²", "Descarta salpicos da silhueta menores do que isto.");
-        s!(ui, p.min_detail_mm2, 0.0..=5.0, "Área mínima do detalhe", " mm²", "Descarta salpicos de detalhe menores do que isto.");
+        s!(ui, p.detail_threshold, 0..=255, "Escuridão do detalhe", "", "Os pixels mais escuros que esse valor viram linhas em relevo no carimbo.");
+        s!(ui, p.min_blob_mm2, 0.0..=20.0, "Área mínima da forma", " mm²", "Descarta pontinhos da silhueta menores que isso.");
+        s!(ui, p.min_detail_mm2, 0.0..=5.0, "Área mínima do detalhe", " mm²", "Descarta pontinhos de detalhe menores que isso.");
 
         ui.separator();
         changed |= ui.checkbox(&mut p.cutter_enabled, "Cortador").changed();
         ui.add_enabled_ui(p.cutter_enabled, |ui| {
             s!(ui, p.blade_thickness, 0.4..=3.0, "Espessura da lâmina", " mm", "Duas larguras de bico (0,8) imprimem uma lâmina limpa de duas paredes.");
             s!(ui, p.blade_height, 5.0..=40.0, "Altura da lâmina", " mm", "");
-            s!(ui, p.blade_offset, 0.0..=3.0, "Afastamento da lâmina", " mm", "Folga entre o contorno da silhueta e a face interior da lâmina.");
-            s!(ui, p.flange_width, 0.0..=15.0, "Largura da aba", " mm", "Rebordo para fora na base, onde faz pressão com a mão.");
+            s!(ui, p.blade_offset, 0.0..=3.0, "Afastamento da lâmina", " mm", "Folga entre o contorno da silhueta e a face interna da lâmina.");
+            s!(ui, p.flange_width, 0.0..=15.0, "Largura da aba", " mm", "Borda para fora na base, onde você faz pressão com a mão.");
             s!(ui, p.flange_height, 0.4..=6.0, "Altura da aba", " mm", "");
-            s!(ui, p.inner_lip_width, 0.0..=5.0, "Largura do rebordo interior", " mm", "Rebordo opcional por dentro da lâmina, à altura da aba. Dá rigidez em formas estreitas.");
+            s!(ui, p.inner_lip_width, 0.0..=5.0, "Largura da borda interna", " mm", "Borda opcional por dentro da lâmina, na altura da aba. Dá rigidez em formas estreitas.");
         });
 
         ui.separator();
         changed |= ui.checkbox(&mut p.stamp_enabled, "Carimbo").changed();
         ui.add_enabled_ui(p.stamp_enabled, |ui| {
             s!(ui, p.plate_thickness, 1.0..=10.0, "Espessura da placa", " mm", "");
-            s!(ui, p.plate_clearance, 0.0..=4.0, "Folga da placa", " mm", "Quanto a placa é mais pequena do que o cortador, para entrar dentro da lâmina.");
+            s!(ui, p.plate_clearance, 0.0..=4.0, "Folga da placa", " mm", "O quanto a placa é menor que o cortador, para entrar dentro da lâmina.");
             s!(ui, p.detail_height, 0.4..=5.0, "Altura do detalhe", " mm", "Quanto as linhas sobressaem da placa.");
-            s!(ui, p.detail_expand, -0.5..=1.5, "Engrossar detalhe", " mm", "Engrossa as linhas do detalhe, ou afina-as com valores negativos. Linhas com menos de 0,8 mm não saem na impressão.");
-            s!(ui, p.rim_width, 0.0..=4.0, "Rebordo do contorno", " mm", "Faixa em relevo a acompanhar a berma da placa, para a bolacha ficar com o contorno marcado. Zero desliga.");
-            s!(ui, p.detail_inset, 0.0..=3.0, "Recuo do detalhe", " mm", "Mantém o resto do detalhe a esta distância por dentro do rebordo.");
+            s!(ui, p.detail_expand, -0.5..=1.5, "Engrossar detalhe", " mm", "Engrossa as linhas do detalhe, ou as afina com valores negativos. Linhas com menos de 0,8 mm não saem na impressão.");
+            s!(ui, p.rim_width, 0.0..=4.0, "Borda do contorno", " mm", "Faixa em relevo acompanhando a beirada da placa, para o biscoito sair com o contorno marcado. Zero desliga.");
+            s!(ui, p.detail_inset, 0.0..=3.0, "Recuo do detalhe", " mm", "Mantém o resto do detalhe a essa distância por dentro da borda.");
         });
 
         ui.separator();
         ui.heading("Curvas");
         s!(ui, p.smooth_iters, 0..=4, "Suavização", "", "Passagens de Chaikin sobre os contornos traçados.");
-        s!(ui, p.simplify_mm, 0.0..=0.3, "Simplificação", " mm", "Tolerância na redução de pontos. Menor dá STL maior.");
+        s!(ui, p.simplify_mm, 0.0..=0.3, "Simplificação", " mm", "Tolerância na redução de pontos. Quanto menor, maior o arquivo.");
 
         ui.separator();
         ui.horizontal(|ui| {
-            if ui.button("Repor predefinições").clicked() {
+            if ui.button("Restaurar padrões").clicked() {
                 *p = Params::default();
                 changed = true;
             }
-            if ui.button("Guardar predefinição").clicked() {
+            if ui.button("Salvar predefinição").clicked() {
                 if let Some(path) = rfd::FileDialog::new()
                     .set_file_name("piracutter-predefinicao.json")
                     .add_filter("JSON", &["json"])
@@ -253,8 +262,8 @@ impl App {
                         .map_err(|e| e.to_string())
                         .and_then(|s| std::fs::write(&path, s).map_err(|e| e.to_string()));
                     self.status = match res {
-                        Ok(()) => format!("Predefinição guardada: {}", path.display()),
-                        Err(e) => format!("Falha ao guardar: {e}"),
+                        Ok(()) => format!("Predefinição salva: {}", path.display()),
+                        Err(e) => format!("Falha ao salvar: {e}"),
                     };
                 }
             }
@@ -276,6 +285,13 @@ impl App {
 
         if changed {
             self.dirty = true;
+        }
+    }
+
+    fn format_ext(&self) -> &'static str {
+        match self.format {
+            Format::ThreeMf => "3mf",
+            Format::Stl => "stl",
         }
     }
 
@@ -353,7 +369,7 @@ impl App {
             painter.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "Abra uma imagem para ver a pré-visualização em sólido.",
+                "Abra uma imagem para ver a prévia em sólido.",
                 egui::FontId::proportional(14.0),
                 Color32::from_gray(140),
             );
@@ -436,7 +452,7 @@ impl App {
         painter.text(
             rect.left_bottom() + Vec2::new(8.0, -8.0),
             egui::Align2::LEFT_BOTTOM,
-            "arrastar para rodar · arrastar com o botão direito para deslocar · roda do rato para ampliar · duplo clique para enquadrar",
+            "arraste para girar · arraste com o botão direito para deslocar · roda do mouse para aproximar · clique duplo para enquadrar",
             egui::FontId::proportional(11.0),
             Color32::from_gray(130),
         );
@@ -505,7 +521,7 @@ fn bg_label(m: BgMode) -> &'static str {
     match m {
         BgMode::Auto => "automático",
         BgMode::Alpha => "transparência",
-        BgMode::BorderColor => "cor das margens",
+        BgMode::BorderColor => "cor das bordas",
     }
 }
 
@@ -548,9 +564,21 @@ impl eframe::App for App {
                         self.open(p);
                     }
                 }
-                if ui.button("Exportar STL…").clicked() {
+                if ui.button("Exportar…").clicked() {
                     self.export_dialog();
                 }
+                egui::ComboBox::from_id_salt("formato")
+                    .selected_text(match self.format {
+                        Format::ThreeMf => "3MF",
+                        Format::Stl => "STL",
+                    })
+                    .width(64.0)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.format, Format::ThreeMf, "3MF")
+                            .on_hover_text("As duas peças em um único arquivo, com nome e compactação.");
+                        ui.selectable_value(&mut self.format, Format::Stl, "STL")
+                            .on_hover_text("Um arquivo por peça, para fatiadores mais antigos.");
+                    });
                 ui.separator();
                 ui.selectable_value(&mut self.view, View::Solid, "3D");
                 ui.selectable_value(&mut self.view, View::Outline, "Contornos");
@@ -565,7 +593,7 @@ impl eframe::App for App {
                         ui.checkbox(&mut self.show_plate_grid, "grelha");
                         if ui
                             .checkbox(&mut self.side_by_side, "lado a lado")
-                            .on_hover_text("Desligado encaixa o carimbo dentro do cortador, como as peças assentam uma na outra.")
+                            .on_hover_text("Desligado encaixa o carimbo dentro do cortador, do jeito que as peças se encaixam.")
                             .changed()
                         {
                             self.rebuild_mesh();

@@ -181,7 +181,9 @@ pub fn rasterize<'a>(
             let Some(p2) = b.project(world[2], near) else { continue };
 
             let lambert = dot(n, key).max(0.0);
-            let rim = 1.0 - dot(n, norm(sub(b.eye, centroid))).abs();
+            // Measured against the view axis, not the direction to this face,
+            // so a large flat surface does not band across its triangles.
+            let rim = 1.0 - dot(n, b.fwd).abs();
             let shade = 0.30 + 0.62 * lambert + 0.10 * rim * rim;
             let color = [
                 (part.color[0] * shade).clamp(0.0, 255.0) as u8,

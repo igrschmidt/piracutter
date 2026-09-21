@@ -61,7 +61,7 @@ impl Default for Params {
         Self {
             size_mm: 80.0,
             size_mode: SizeMode::Longest,
-            px_per_mm: 8.0,
+            px_per_mm: 12.0,
             mirror: true,
 
             bg_mode: BgMode::Auto,
